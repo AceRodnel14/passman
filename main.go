@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,11 +15,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// version is the release; override at build time with
+// -ldflags "-X main.version=1.2.3".
+var version = "0.2.0"
+
 type Config struct {
 	DatabaseURL   string
 	ListenAddr    string
 	SessionMaxAge time.Duration
 	SecureCookie  bool
+	// BackupAllIPs are the direct peer addresses allowed to call /api/backup-all.
+	// Empty disables the endpoint.
+	BackupAllIPs []netip.Prefix
 }
 
 func env(key, def string) string {
@@ -58,6 +66,9 @@ func loadConfig() Config {
 		log.Fatal(err)
 	}
 	cfg.SessionMaxAge = age
+	if cfg.BackupAllIPs, err = parseCIDRs(os.Getenv("BACKUP_ALL_ALLOWED_IPS")); err != nil {
+		log.Fatalf("BACKUP_ALL_ALLOWED_IPS: %v", err)
+	}
 	return cfg
 }
 
@@ -87,7 +98,7 @@ func main() {
 	}
 
 	cfg := loadConfig()
-	app := &App{cfg: cfg, db: connect(cfg), limiter: &limiter{fails: map[string][]time.Time{}}}
+	app := newApp(cfg, connect(cfg))
 	go app.reapSessions()
 
 	if done, err := isSetUp(context.Background(), app.db); err == nil && !done {

@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -24,6 +25,7 @@ type Session struct {
 	Username string
 	IsAdmin  bool
 	DEK      []byte
+	Expires  time.Time
 	token    []byte
 }
 
@@ -83,10 +85,10 @@ func (a *App) currentSession(r *http.Request) (*Session, error) {
 	s := &Session{token: token}
 	var wrapped []byte
 	err = a.db.QueryRow(r.Context(),
-		`SELECT s.user_id, s.wrapped_dek, u.username, u.is_admin
+		`SELECT s.user_id, s.wrapped_dek, u.username, u.is_admin, s.expires_at
 		 FROM sessions s JOIN users u ON u.id = s.user_id
 		 WHERE s.token_hash = $1 AND s.expires_at > now()`, hash[:],
-	).Scan(&s.UserID, &wrapped, &s.Username, &s.IsAdmin)
+	).Scan(&s.UserID, &wrapped, &s.Username, &s.IsAdmin, &s.Expires)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
@@ -114,15 +116,38 @@ func (a *App) clearCookie(w http.ResponseWriter) {
 
 func (a *App) reapSessions() {
 	for range time.Tick(time.Hour) {
-		a.db.Exec(context.Background(), `DELETE FROM sessions WHERE expires_at <= now()`)
+		if _, err := a.db.Exec(context.Background(), `DELETE FROM sessions WHERE expires_at <= now()`); err != nil {
+			log.Printf("reap sessions: %v", err)
+		}
 	}
 }
 
 // --- login throttling ---
 
+// sem is a non-blocking counting semaphore bounding concurrent KDF-heavy work
+// (Argon2 uses a lot of memory).
+type sem chan struct{}
+
+func (s sem) tryAcquire() bool {
+	select {
+	case s <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s sem) release() { <-s }
+
 type limiter struct {
-	mu    sync.Mutex
-	fails map[string][]time.Time
+	mu     sync.Mutex
+	fails  map[string][]time.Time
+	max    int
+	window time.Duration
+}
+
+func newLimiter(max int, window time.Duration) *limiter {
+	return &limiter{fails: map[string][]time.Time{}, max: max, window: window}
 }
 
 const (
@@ -133,7 +158,35 @@ const (
 func (l *limiter) blocked(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return len(l.prune(key)) >= maxFails
+	return len(l.prune(key)) >= l.max
+}
+
+// take records an attempt unless the key is already at its limit, as one
+// atomic step, so concurrent requests see each other before any slow work.
+// It reports whether the attempt may proceed.
+func (l *limiter) take(key string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	cur := l.prune(key)
+	if len(cur) >= l.max {
+		return false
+	}
+	l.fails[key] = append(cur, time.Now())
+	return true
+}
+
+// release undoes the most recent take (used for successful attempts).
+func (l *limiter) release(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if cur := l.prune(key); len(cur) > 0 {
+		cur = cur[:len(cur)-1]
+		if len(cur) == 0 {
+			delete(l.fails, key)
+		} else {
+			l.fails[key] = cur
+		}
+	}
 }
 
 func (l *limiter) fail(key string) {
@@ -151,7 +204,7 @@ func (l *limiter) reset(key string) {
 func (l *limiter) prune(key string) []time.Time {
 	keep := l.fails[key][:0]
 	for _, t := range l.fails[key] {
-		if time.Since(t) < failWindow {
+		if time.Since(t) < l.window {
 			keep = append(keep, t)
 		}
 	}
@@ -171,7 +224,7 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	resp := map[string]any{"setupRequired": !setUp}
+	resp := map[string]any{"setupRequired": !setUp, "version": version}
 	if s, err := a.currentSession(r); err != nil {
 		serverError(w, err)
 		return
@@ -281,34 +334,52 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"username": u.Username, "isAdmin": false})
 }
 
+var errBadLogin = errors.New("wrong username or password")
+
+// checkLogin verifies a username and password and returns the user and their
+// unwrapped data key. Unknown users and wrong passwords give errBadLogin.
+func (a *App) checkLogin(ctx context.Context, username, password string) (*User, []byte, error) {
+	u, err := userByName(ctx, a.db, username)
+	if errors.Is(err, ErrNotFound) {
+		deriveKey(password, make([]byte, saltLen)) // similar timing for unknown users
+		return nil, nil, errBadLogin
+	} else if err != nil {
+		return nil, nil, err
+	}
+	if !checkPassword(password, u.AuthSalt, u.AuthHash) {
+		return nil, nil, errBadLogin
+	}
+	dek, err := open(deriveKey(password, u.KEKSalt), u.WrappedDEK, dekAAD(u.Username))
+	if err != nil {
+		return nil, nil, fmt.Errorf("unwrap key for %s: %w", u.Username, err)
+	}
+	return u, dek, nil
+}
+
 func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct{ Username, Password string }
 	if !readJSON(w, r, &req) {
 		return
 	}
 	key := normUsername(req.Username)
-	if a.limiter.blocked(key) {
+	if !a.kdf.tryAcquire() {
+		writeError(w, http.StatusTooManyRequests, "Busy, try again.")
+		return
+	}
+	defer a.kdf.release()
+	// The attempt is recorded before the slow key derivation so that
+	// concurrent guesses count against the limit; success clears it.
+	if !a.limiter.take(key) {
 		writeError(w, http.StatusTooManyRequests, "Too many failed attempts. Try again in a few minutes.")
 		return
 	}
-	u, err := userByName(r.Context(), a.db, key)
-	if errors.Is(err, ErrNotFound) {
-		deriveKey(req.Password, make([]byte, saltLen)) // similar timing for unknown users
-		a.limiter.fail(key)
+	u, dek, err := a.checkLogin(r.Context(), key, req.Password)
+	if errors.Is(err, errBadLogin) {
 		writeError(w, http.StatusUnauthorized, "Wrong username or password.")
 		return
 	} else if err != nil {
+		a.limiter.release(key)
 		serverError(w, err)
-		return
-	}
-	if !checkPassword(req.Password, u.AuthSalt, u.AuthHash) {
-		a.limiter.fail(key)
-		writeError(w, http.StatusUnauthorized, "Wrong username or password.")
-		return
-	}
-	dek, err := open(deriveKey(req.Password, u.KEKSalt), u.WrappedDEK, dekAAD(u.Username))
-	if err != nil {
-		serverError(w, fmt.Errorf("unwrap key for %s: %w", u.Username, err))
 		return
 	}
 	a.limiter.reset(key)
@@ -323,7 +394,9 @@ func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		if token, err := base64.RawURLEncoding.DecodeString(c.Value); err == nil {
 			hash := sha256.Sum256(token)
-			a.db.Exec(r.Context(), `DELETE FROM sessions WHERE token_hash = $1`, hash[:])
+			if _, err := a.db.Exec(r.Context(), `DELETE FROM sessions WHERE token_hash = $1`, hash[:]); err != nil {
+				log.Printf("logout: delete session: %v", err)
+			}
 		}
 	}
 	a.clearCookie(w)

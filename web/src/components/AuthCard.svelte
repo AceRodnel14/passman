@@ -1,14 +1,15 @@
 <script>
-  import { KeyRound } from '@lucide/svelte';
+  import Logo from './Logo.svelte';
+  import { session } from '../lib/session.svelte.js';
   let { children, wide = false } = $props();
 </script>
 
 <div class="screen">
-  <div class="brand"><span class="logo"><KeyRound size={22} /></span> passman</div>
+  <div class="brand"><span class="logo"><Logo size={28} /></span> passman</div>
   <div class="card auth" class:wide>
     {@render children()}
   </div>
-  <p class="tagline">passman — keep your passwords close</p>
+  <p class="tagline">passman — keep your passwords close{#if session.version} · v{session.version}{/if}</p>
 </div>
 
 <style>

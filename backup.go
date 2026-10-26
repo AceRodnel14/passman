@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -64,55 +65,76 @@ func (a *App) handleBackup(w http.ResponseWriter, r *http.Request, s *Session) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	ctx := r.Context()
-	v := s.vault()
+	a.sendBackup(w, r.Context(), s.vault(), req.Password)
+}
+
+// sendBackup writes one user's backup: plain JSON, or an AES-256 zip when
+// password is set.
+func (a *App) sendBackup(w http.ResponseWriter, ctx context.Context, v vault, password string) {
+	body, err := a.buildBackup(ctx, v)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	base := "passwords-backup_" + time.Now().Format("2006-01-02")
+	if password == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+base+`.json"`)
+		w.Write(body)
+		return
+	}
+	zipped, err := zipBackups(password, map[string][]byte{base + ".json": body})
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+base+`.zip"`)
+	w.Write(zipped)
+}
+
+// buildBackup returns the backup JSON for one vault.
+func (a *App) buildBackup(ctx context.Context, v vault) ([]byte, error) {
 	version, encrypted := backupVersion, false
 	out := backupFile{Version: &version, Encrypted: &encrypted, Passwords: []backupPassword{}, Folders: []backupFolder{}, Tags: []any{}}
 
 	rows, err := a.db.Query(ctx,
 		`SELECT id::text, revision::text, coalesce(parent_id::text, ''), label, favorite, updated_at FROM folders WHERE user_id = $1 ORDER BY created_at`, v.userID)
 	if err != nil {
-		serverError(w, err)
-		return
+		return nil, err
 	}
 	for rows.Next() {
 		var f backupFolder
 		var label []byte
 		var updated time.Time
 		if err := rows.Scan(&f.ID, &f.Revision, &f.Parent, &label, &f.Favorite, &updated); err != nil {
-			serverError(w, err)
-			return
+			return nil, err
 		}
 		if f.Label, err = v.openLabel(f.ID, label); err != nil {
-			serverError(w, err)
-			return
+			return nil, err
 		}
 		f.Parent, f.Edited = rootIfEmpty(f.Parent), updated.Unix()
 		out.Folders = append(out.Folders, f)
 	}
 	if rows.Err() != nil {
-		serverError(w, rows.Err())
-		return
+		return nil, rows.Err()
 	}
 
 	rows, err = a.db.Query(ctx,
 		`SELECT id::text, revision::text, coalesce(folder_id::text, ''), data, favorite, updated_at FROM passwords WHERE user_id = $1 ORDER BY created_at`, v.userID)
 	if err != nil {
-		serverError(w, err)
-		return
+		return nil, err
 	}
 	for rows.Next() {
 		var p backupPassword
 		var data []byte
 		var updated time.Time
 		if err := rows.Scan(&p.ID, &p.Revision, &p.Folder, &data, &p.Favorite, &updated); err != nil {
-			serverError(w, err)
-			return
+			return nil, err
 		}
 		rec, err := v.openRecord(p.ID, data)
 		if err != nil {
-			serverError(w, err)
-			return
+			return nil, err
 		}
 		p.Label, p.Username, p.Password, p.Notes, p.URL = rec.Label, rec.Username, rec.Password, rec.Notes, rec.URL
 		p.CustomFields, p.Icon = rec.CustomFields, rec.Icon
@@ -123,39 +145,35 @@ func (a *App) handleBackup(w http.ResponseWriter, r *http.Request, s *Session) {
 		out.Passwords = append(out.Passwords, p)
 	}
 	if rows.Err() != nil {
-		serverError(w, rows.Err())
-		return
+		return nil, rows.Err()
 	}
 
-	body, err := json.MarshalIndent(out, "", "  ")
-	if err != nil {
-		serverError(w, err)
-		return
-	}
-	base := "passwords-backup_" + time.Now().Format("2006-01-02")
-	if req.Password == "" {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Content-Disposition", `attachment; filename="`+base+`.json"`)
-		w.Write(body)
-		return
-	}
+	return json.MarshalIndent(out, "", "  ")
+}
 
+// zipBackups packs files (name -> content) into one AES-256 encrypted zip,
+// in name order.
+func zipBackups(password string, files map[string][]byte) ([]byte, error) {
+	names := make([]string, 0, len(files))
+	for n := range files {
+		names = append(names, n)
+	}
+	sort.Strings(names)
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	fw, err := zw.Encrypt(base+".json", req.Password, zip.AES256Encryption)
-	if err == nil {
-		_, err = fw.Write(body)
+	for _, n := range names {
+		fw, err := zw.Encrypt(n, password, zip.AES256Encryption)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := fw.Write(files[n]); err != nil {
+			return nil, err
+		}
 	}
-	if err == nil {
-		err = zw.Close()
+	if err := zw.Close(); err != nil {
+		return nil, err
 	}
-	if err != nil {
-		serverError(w, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+base+`.zip"`)
-	w.Write(buf.Bytes())
+	return buf.Bytes(), nil
 }
 
 // --- import ---

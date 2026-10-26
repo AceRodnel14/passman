@@ -1,4 +1,5 @@
 <script>
+  import Logo from './Logo.svelte';
   import { Folder, FolderOpen, Archive, Menu as MenuIcon, KeyRound, LogOut, Users, ChevronDown } from '@lucide/svelte';
   import FolderTree from './FolderTree.svelte';
   import ChangePassword from './ChangePassword.svelte';
@@ -54,7 +55,7 @@
       <MenuIcon size={20} />
     </button>
     <button class="brand" type="button" onclick={() => go('/folders')}>
-      <span class="logo"><KeyRound size={18} /></span>
+      <span class="logo"><Logo size={20} /></span>
       passman
     </button>
     <div class="spacer"></div>
@@ -71,6 +72,7 @@
             <button type="button" role="menuitem" onclick={() => ((userMenu = false), go('/admin'))}><Users size={16} /> Manage users</button>
           {/if}
           <button type="button" role="menuitem" onclick={logout}><LogOut size={16} /> Log out</button>
+          {#if session.version}<div class="ver">passman v{session.version}</div>{/if}
         </div>
       {/if}
     </div>
@@ -175,4 +177,5 @@
     .sidebar.open { transform: none; box-shadow: var(--shadow-lg); }
     .scrim { display: block; position: absolute; inset: 0; z-index: 20; border: 0; background: rgb(10 20 30 / .35); }
   }
+  .ver { padding: 6px 12px 4px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--border); margin-top: 4px; }
 </style>

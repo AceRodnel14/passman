@@ -282,7 +282,7 @@ func (a *App) handleSavePassword(w http.ResponseWriter, r *http.Request, s *Sess
 	if !readJSON(w, r, &in) {
 		return
 	}
-	if err := in.Record.normalize(); err != nil {
+	if err := in.normalize(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

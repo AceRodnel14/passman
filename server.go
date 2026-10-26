@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -20,7 +21,27 @@ var distFS embed.FS
 type App struct {
 	cfg     Config
 	db      *pgxpool.Pool
-	limiter *limiter
+	limiter *limiter // failed logins, per username
+
+	exportIP  *limiter // failed /api/export logins, per client IP
+	masterIP  *limiter // failed master keys on /api/backup-all, per client IP
+	masterAll *limiter // failed master keys on /api/backup-all, all clients together
+
+	kdf    sem // concurrent logins and exports (Argon2 memory)
+	kdfAll sem // concurrent backup-all runs
+}
+
+func newApp(cfg Config, db *pgxpool.Pool) *App {
+	return &App{
+		cfg:       cfg,
+		db:        db,
+		limiter:   newLimiter(maxFails, failWindow),
+		exportIP:  newLimiter(20, 15*time.Minute),
+		masterIP:  newLimiter(5, 15*time.Minute),
+		masterAll: newLimiter(5, 15*time.Minute),
+		kdf:       make(sem, 2),
+		kdfAll:    make(sem, 1),
+	}
 }
 
 type authedHandler func(http.ResponseWriter, *http.Request, *Session)
@@ -37,6 +58,8 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/account/password", a.auth(a.handleChangePassword))
 
 	mux.HandleFunc("GET /api/vault", a.auth(a.handleVault))
+	mux.HandleFunc("GET /api/sites", a.auth(a.handleSites))
+	mux.HandleFunc("GET /api/fill/{id}", a.auth(a.handleFill))
 	mux.HandleFunc("GET /api/passwords/{id}", a.auth(a.handleGetPassword))
 	mux.HandleFunc("POST /api/passwords", a.auth(a.handleSavePassword))
 	mux.HandleFunc("PUT /api/passwords/{id}", a.auth(a.handleSavePassword))
@@ -46,6 +69,10 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("PUT /api/folders/{id}", a.auth(a.handleRenameFolder))
 	mux.HandleFunc("DELETE /api/folders/{id}", a.auth(a.handleDeleteFolder))
 	mux.HandleFunc("PUT /api/folders/{id}/favorite", a.auth(a.handleFavorite("folders")))
+	// Credential-authenticated, cookie-free endpoints for the extension and
+	// scheduled backups (see sameOrigin).
+	mux.HandleFunc("POST /api/export", a.handleExport)
+	mux.HandleFunc("/api/backup-all", a.handleBackupAll) // any method: 404 unless allowed, so it can't be probed
 	mux.HandleFunc("GET /api/generate", a.auth(a.handleGenerate))
 	mux.HandleFunc("POST /api/backup", a.auth(a.handleBackup))
 	mux.HandleFunc("POST /api/restore", a.auth(a.handleRestore))
@@ -86,9 +113,32 @@ func (a *App) admin(h authedHandler) http.HandlerFunc {
 
 // sameOrigin rejects cross-site state-changing requests. Combined with
 // SameSite=Lax cookies this is the CSRF protection.
+//
+// originExempt lists the only paths that skip the check. They ignore cookies
+// entirely and authenticate with credentials in the request body, so there is
+// no ambient authority for a cross-site page to ride on, and the browser
+// extension calls them from a chrome-extension:// origin. Keep this an exact
+// allow-list; never add a path that reads the session cookie.
+//
+// The handlers' requirement of Content-Type: application/json is load-bearing:
+// a cross-site page cannot send that type without a CORS preflight, and
+// passman answers preflights without CORS headers, so the browser blocks it.
+// Do not relax readJSON for these paths. As a second guard, requests the
+// browser marks Sec-Fetch-Site: cross-site are refused unless they come from
+// an extension origin.
+var originExempt = map[string]bool{
+	"/api/export":     true,
+	"/api/backup-all": true,
+}
+
 func sameOrigin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		if originExempt[r.URL.Path] {
+			if r.Header.Get("Sec-Fetch-Site") == "cross-site" && !strings.HasPrefix(r.Header.Get("Origin"), "chrome-extension://") {
+				writeError(w, http.StatusForbidden, "Cross-origin request rejected.")
+				return
+			}
+		} else if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			if o := r.Header.Get("Origin"); o != "" {
 				if u, err := url.Parse(o); err != nil || u.Host != r.Host {
 					writeError(w, http.StatusForbidden, "Cross-origin request rejected.")

@@ -1,0 +1,19 @@
+version: "2"
+linters:
+  settings:
+    errcheck:
+      # Best-effort calls whose failure cannot be handled usefully:
+      # a response write/encode fails only when the client has gone away, and
+      # Close/Rollback run in defers on read-only files or already-finished transactions.
+      exclude-functions:
+        - (net/http.ResponseWriter).Write
+        - (*encoding/json.Encoder).Encode
+        - (mime/multipart.File).Close
+        - (io.ReadCloser).Close
+        - (github.com/jackc/pgx/v5.Tx).Rollback
+    staticcheck:
+      checks:
+        - all
+        # ST1005: several error strings are shown to users as full sentences
+        # ("Password is required."), which is intended; they are never wrapped.
+        - -ST1005

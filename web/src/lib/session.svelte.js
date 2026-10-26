@@ -3,11 +3,12 @@ import { navigate } from './router.svelte.js';
 import { toast } from './toast.svelte.js';
 import { clearVault } from './vault.svelte.js';
 
-export const session = $state({ loaded: false, setupRequired: false, user: null });
+export const session = $state({ loaded: false, setupRequired: false, version: '', user: null });
 
 export async function loadSession() {
   const s = await api('GET', '/api/state');
   session.setupRequired = s.setupRequired;
+  session.version = s.version ?? '';
   session.user = s.user ?? null;
   session.loaded = true;
 }

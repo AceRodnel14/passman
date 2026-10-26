@@ -8,12 +8,13 @@ RUN npm run build
 
 # --- backend ---
 FROM golang:1.26-alpine AS build
+ARG VERSION=0.2.0
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY *.go ./
 COPY --from=web /web/dist ./web/dist
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /passman .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /passman .
 
 # --- runtime ---
 FROM alpine:3.22
