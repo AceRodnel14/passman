@@ -1,4 +1,5 @@
 <script>
+  import { adoptTheme } from '../lib/theme.svelte.js';
   import { TriangleAlert, Copy, Check, ArrowRight } from '@lucide/svelte';
   import AuthCard from '../components/AuthCard.svelte';
   import PasswordInput from '../components/PasswordInput.svelte';
@@ -44,7 +45,8 @@
 
   function finish() {
     session.setupRequired = false;
-    session.user = { username: 'admin', isAdmin: true };
+    session.user = { username: 'admin', isAdmin: true, theme: { mode: 'auto', hue: null } };
+    adoptTheme(session.user.theme);
     navigate('/folders', { replace: true });
   }
 </script>

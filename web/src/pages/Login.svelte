@@ -1,4 +1,5 @@
 <script>
+  import { adoptTheme } from '../lib/theme.svelte.js';
   import { LogIn, UserPlus, ArrowRight } from '@lucide/svelte';
   import AuthCard from '../components/AuthCard.svelte';
   import PasswordInput from '../components/PasswordInput.svelte';
@@ -40,6 +41,7 @@
           ? await api('POST', '/api/login', { username, password })
           : await api('POST', '/api/register', { username, password, confirm });
       session.user = user;
+      adoptTheme(user.theme);
       navigate('/folders', { replace: true });
     } catch (err) {
       error = err.message;

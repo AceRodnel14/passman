@@ -56,7 +56,7 @@
   header {
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
     padding: 14px 14px 14px 20px;
-    background: linear-gradient(120deg, var(--accent), color-mix(in srgb, var(--accent) 70%, #22c1ee));
+    background: linear-gradient(120deg, var(--accent), color-mix(in srgb, var(--accent) 70%, var(--accent-glow)));
     color: #fff;
   }
   h2 { font-size: 17px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

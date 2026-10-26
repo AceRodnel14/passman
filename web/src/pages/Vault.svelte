@@ -1,10 +1,11 @@
 <script>
-  import { Star, Folder, ChevronRight, FolderPlus, KeyRound, Info, Pencil, CopyPlus, Trash2, FolderOpen, MousePointerClick, Plus } from '@lucide/svelte';
+  import { Star, Folder, ChevronRight, FolderPlus, KeyRound, Info, Pencil, CopyPlus, FolderInput, Trash2, FolderOpen, MousePointerClick, Plus } from '@lucide/svelte';
   import Layout from '../components/Layout.svelte';
   import Menu from '../components/Menu.svelte';
   import Shield from '../components/Shield.svelte';
   import PasswordIcon from '../components/PasswordIcon.svelte';
   import PasswordForm from '../components/PasswordForm.svelte';
+  import MoveDialog from '../components/MoveDialog.svelte';
   import Details from '../components/Details.svelte';
   import NameDialog from '../components/NameDialog.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
@@ -107,6 +108,7 @@
       { label: 'Details', icon: Info, onclick: () => openRecord(row, 'details') },
       { label: 'Edit', icon: Pencil, onclick: () => openRecord(row, 'edit') },
       { label: 'Edit as new', icon: CopyPlus, onclick: () => openRecord(row, 'copy') },
+      { label: 'Move', icon: FolderInput, onclick: () => (modal = { kind: 'move', record: row }) },
       { label: 'Delete', icon: Trash2, danger: true, onclick: () => (modal = { kind: 'deletePassword', row }) },
     ];
   }
@@ -243,7 +245,9 @@
 {#if modal?.kind === 'form'}
   <PasswordForm mode={modal.mode} record={modal.record} folder={folderId} onclose={close} onsaved={saved} />
 {:else if modal?.kind === 'details'}
-  <Details record={modal.record} onclose={close} />
+  <Details record={modal.record} onclose={close} onmove={() => (modal = { kind: 'move', record: modal.record })} />
+{:else if modal?.kind === 'move'}
+  <MoveDialog record={modal.record} onclose={close} />
 {:else if modal?.kind === 'newFolder'}
   <NameDialog title="New folder" label="Folder name" confirmLabel="Create" onsubmit={createFolder} onclose={close} />
 {:else if modal?.kind === 'renameFolder'}

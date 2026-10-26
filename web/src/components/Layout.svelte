@@ -1,12 +1,14 @@
 <script>
   import Logo from './Logo.svelte';
-  import { Folder, FolderOpen, Archive, Menu as MenuIcon, KeyRound, LogOut, Users, ChevronDown } from '@lucide/svelte';
+  import { Folder, FolderOpen, Archive, Menu as MenuIcon, KeyRound, LogOut, Users, ChevronDown, Palette } from '@lucide/svelte';
   import FolderTree from './FolderTree.svelte';
   import ChangePassword from './ChangePassword.svelte';
   import { session } from '../lib/session.svelte.js';
   import { navigate } from '../lib/router.svelte.js';
   import { folderTrail, clearVault } from '../lib/vault.svelte.js';
   import { api } from '../lib/api.js';
+  import { cancelPendingTheme } from '../lib/theme.svelte.js';
+  import Appearance from './Appearance.svelte';
 
   let { section, currentFolder = null, children } = $props();
 
@@ -14,6 +16,7 @@
   let drawerOpen = $state(false);
   let userMenu = $state(false);
   let changingPassword = $state(false);
+  let appearance = $state(false);
 
   // Keep the path to the open folder expanded in the tree.
   $effect(() => {
@@ -40,6 +43,7 @@
     try {
       await api('POST', '/api/logout');
     } finally {
+      cancelPendingTheme();
       clearVault();
       session.user = null;
       navigate('/login', { replace: true });
@@ -67,6 +71,7 @@
       </button>
       {#if userMenu}
         <div class="user-menu" role="menu">
+          <button type="button" role="menuitem" onclick={() => ((userMenu = false), (appearance = true))}><Palette size={16} /> Appearance</button>
           <button type="button" role="menuitem" onclick={() => ((userMenu = false), (changingPassword = true))}><KeyRound size={16} /> Change password</button>
           {#if session.user.isAdmin}
             <button type="button" role="menuitem" onclick={() => ((userMenu = false), go('/admin'))}><Users size={16} /> Manage users</button>
@@ -104,6 +109,10 @@
   </div>
 </div>
 
+{#if appearance}
+  <Appearance onclose={() => (appearance = false)} />
+{/if}
+
 {#if changingPassword}
   <ChangePassword onclose={() => (changingPassword = false)} />
 {/if}
@@ -113,7 +122,7 @@
   .topbar {
     display: flex; align-items: center; gap: 8px;
     height: 56px; padding: 0 12px 0 16px; flex: none;
-    background: linear-gradient(110deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 75%, #1fb5e8) 100%);
+    background: linear-gradient(110deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 75%, var(--accent-glow)) 100%);
     color: #fff;
   }
   .drawer-btn { display: none; color: #fff; }

@@ -18,8 +18,8 @@
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
     padding: 32px 16px;
     background:
-      radial-gradient(1200px 600px at 10% -10%, color-mix(in srgb, #3cc8f2 55%, transparent), transparent 60%),
-      radial-gradient(900px 500px at 110% 110%, color-mix(in srgb, #003e66 70%, transparent), transparent 60%),
+      radial-gradient(1200px 600px at 10% -10%, color-mix(in srgb, var(--accent-hi) 55%, transparent), transparent 60%),
+      radial-gradient(900px 500px at 110% 110%, color-mix(in srgb, var(--accent-lo) 70%, transparent), transparent 60%),
       var(--accent);
   }
   .brand { display: flex; align-items: center; gap: 12px; color: #fff; font: 700 26px/1 var(--font); letter-spacing: -.02em; }

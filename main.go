@@ -17,7 +17,7 @@ import (
 
 // version is the release; override at build time with
 // -ldflags "-X main.version=1.2.3".
-var version = "0.2.0"
+var version = "0.2.1"
 
 type Config struct {
 	DatabaseURL   string

@@ -37,8 +37,9 @@
   .text.two { font-size: calc(var(--size) * 0.36); letter-spacing: -0.02em; }
   .tile.logo { box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.06); }
   img { width: 100%; height: 100%; object-fit: contain; image-rendering: auto; }
+  /* Logos keep the light tile so dark logos stay visible. */
   @media (prefers-color-scheme: dark) {
-    /* Logos keep the light tile so dark logos stay visible. */
-    .tile:not(.logo) { background: hsl(var(--h) 40% 22%); color: hsl(var(--h) 70% 80%); }
+    :global(:root:not([data-theme='light'])) .tile:not(.logo) { background: hsl(var(--h) 40% 22%); color: hsl(var(--h) 70% 80%); }
   }
+  :global(:root[data-theme='dark']) .tile:not(.logo) { background: hsl(var(--h) 40% 22%); color: hsl(var(--h) 70% 80%); }
 </style>

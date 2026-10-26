@@ -113,7 +113,20 @@ The per-IP throttles on `/api/export` and `/api/backup-all` also use the TCP pee
 - So the database alone can't decrypt anything, and admins can't see other users' vaults through passman. Someone holding **both** a database dump **and** the master key could recover any vault. Guard the master key accordingly.
 - **`POST /api/backup-all` changes that for the network.** Anyone who has the master key **and** can reach passman from an address in `BACKUP_ALL_ALLOWED_IPS` can download every user's vault over the network (as an encrypted zip whose password they choose). The endpoint is off unless that variable is set; keep the list as tight as possible (single hosts, not wide networks), and note that any workload inside the allowed network can try it. Leave it unset if you don't need unattended full backups.
 - Sessions are stored in Postgres. Each session's copy of the data key is encrypted with a key that exists only in the user's cookie. Sessions survive restarts, and passman can run as several replicas.
-- Login is throttled after 5 failed attempts per username (5 minutes). `/api/export` shares that throttle and adds a per-IP one.
+- Login is throttled after 5 failed attempts per username (5 minutes). `/api/export` and the password check on **Move** share that throttle (`/api/export` adds a per-IP one), so repeated wrong passwords in the Move dialog also lock that account's login for 5 minutes.
+- Folder changes require the login password: moving an entry to another folder, through the Move dialog (`POST /api/passwords/{id}/move`) or by changing the folder while editing (`PUT /api/passwords/{id}`), is checked on the server every time. Other edits and creating entries don't ask for it. Restoring a backup in overwrite mode can still change existing entries' folders without it.
+
+## Account and vault API additions
+
+- `GET /api/state` includes the user's appearance: `user.theme = {"mode": "auto"|"light"|"dark", "hue": 0..359 | null}`
+  (`null` = the original blue; `auto` follows the device). Login and register responses carry the same `theme`.
+- `PUT /api/account/theme` with `{"mode","hue"}` saves it for the account (follows the user across devices); 400 if invalid.
+- `POST /api/passwords/{id}/move` with `{"folder","password"}` (`folder` `""` or the zero UUID = top level). Wrong password
+  is **403** (not 401, so clients don't treat it as an expired session), unknown folder 400, unknown entry 404,
+  throttled 429; success returns `{"folder"}`. Only the folder and revision change; the record is not re-encrypted.
+- `PUT /api/passwords/{id}` accepts an optional `loginPassword` (separate from `password`, the entry's secret). It is
+  required, with the same 400/403/429 responses as move, only when `folder` differs from the entry's current folder
+  (`""` and the zero UUID both mean top level; UUID case is ignored). `POST /api/passwords` (create) never needs it.
 
 ## API for the browser extension
 

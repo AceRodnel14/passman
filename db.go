@@ -68,6 +68,9 @@ CREATE TABLE IF NOT EXISTS passwords (
     FOREIGN KEY (user_id, folder_id) REFERENCES folders (user_id, id)
 );
 CREATE INDEX IF NOT EXISTS passwords_fingerprint_idx ON passwords (user_id, fingerprint);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS theme_mode TEXT NOT NULL DEFAULT 'auto';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS theme_hue SMALLINT;
 `
 
 var ErrNotFound = errors.New("not found")
@@ -147,6 +150,7 @@ type User struct {
 	KEKSalt    []byte
 	WrappedDEK []byte
 	EscrowDEK  []byte
+	Theme      Theme
 }
 
 func dekAAD(username string) []byte { return []byte("dek:" + normUsername(username)) }
@@ -154,7 +158,7 @@ func dekAAD(username string) []byte { return []byte("dek:" + normUsername(userna
 // createUser builds the key material for a fresh account and inserts it.
 func createUser(ctx context.Context, q querier, pub *ecdh.PublicKey, username, password string, isAdmin bool) (*User, []byte, error) {
 	dek := randomBytes(keyLen)
-	u := &User{Username: username, IsAdmin: isAdmin}
+	u := &User{Username: username, IsAdmin: isAdmin, Theme: Theme{Mode: themeAuto}}
 	setUserPassword(u, dek, password)
 	escrow, err := escrowSeal(pub, dek, dekAAD(username))
 	if err != nil {
@@ -185,11 +189,11 @@ func savePassword(ctx context.Context, q querier, u *User) error {
 	return err
 }
 
-const userCols = `id, username, is_admin, auth_salt, auth_hash, kek_salt, wrapped_dek, escrow_dek`
+const userCols = `id, username, is_admin, auth_salt, auth_hash, kek_salt, wrapped_dek, escrow_dek, theme_mode, theme_hue`
 
 func scanUser(row pgx.Row) (*User, error) {
 	var u User
-	err := row.Scan(&u.ID, &u.Username, &u.IsAdmin, &u.AuthSalt, &u.AuthHash, &u.KEKSalt, &u.WrappedDEK, &u.EscrowDEK)
+	err := row.Scan(&u.ID, &u.Username, &u.IsAdmin, &u.AuthSalt, &u.AuthHash, &u.KEKSalt, &u.WrappedDEK, &u.EscrowDEK, &u.Theme.Mode, &u.Theme.Hue)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}

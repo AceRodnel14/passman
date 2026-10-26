@@ -6,7 +6,8 @@
   import Modal from './Modal.svelte';
   import { api } from '../lib/api.js';
   import { toast } from '../lib/toast.svelte.js';
-  import { folderOptions } from '../lib/vault.svelte.js';
+  import FolderPicker from './FolderPicker.svelte';
+  import PasswordInput from './PasswordInput.svelte';
   import { storageGet, storageSet } from '../lib/util.js';
 
   /** mode: 'create' | 'edit' | 'copy' (Edit as new) */
@@ -25,6 +26,10 @@
   let username = $state(seed?.username ?? '');
   let url = $state(seed?.url ?? '');
   let folderId = $state(init.folder);
+  // Editing: moving the entry to another folder needs the login password.
+  const origFolder = init.folder ?? '';
+  let loginPassword = $state('');
+  const moving = $derived(mode === 'edit' && (folderId ?? '') !== origFolder);
   let notes = $state(seed?.notes ?? '');
   let fields = $state((seed?.customFields ?? []).map((f) => ({ ...f, show: false })));
   let showPassword = $state(false);
@@ -79,8 +84,6 @@
   let genOpen = $state(false);
   let genError = $state('');
 
-  const options = $derived(folderOptions());
-
   function validLength() {
     const s = genLength.trim();
     if (!/^\d+$/.test(s)) return null;
@@ -124,6 +127,7 @@
     else if (fields.some((f) => !f.label.trim() && f.value)) error = 'Every custom field needs a name.';
     else if (iconMode === 'letters' && !iconText.trim()) error = 'Enter 1 or 2 characters for the icon, or choose Auto.';
     else if (iconMode === 'logo' && !iconImage) error = 'Upload an image for the icon, or choose another icon type.';
+    else if (moving && !loginPassword) error = 'Enter your login password to move this password to another folder.';
     if (error) return;
 
     const body = {
@@ -138,13 +142,17 @@
         .map(({ label, type, value }) => ({ label: label.trim(), type, value })),
       icon: iconBody(),
     };
+    // Separate from `password` (the entry's secret); only sent when the folder changes.
+    if (moving) body.loginPassword = loginPassword;
     busy = true;
     try {
       const res = mode === 'edit' ? await api('PUT', `/api/passwords/${record.id}`, body) : await api('POST', '/api/passwords', body);
       toast(mode === 'edit' ? 'Password updated' : 'Password created');
+      loginPassword = '';
       onsaved(res.id);
     } catch (err) {
       error = err.message;
+      loginPassword = '';
     } finally {
       busy = false;
     }
@@ -211,14 +219,16 @@
       <input class="input" bind:value={url} placeholder="https://" autocomplete="off" spellcheck="false" />
     </label>
 
-    <label class="field">
+    <div class="field">
       <span class="field-label"><Folder size={14} /> Folder</span>
-      <select class="input" bind:value={folderId}>
-        {#each options as o (o.id)}
-          <option value={o.id}>{'   '.repeat(o.depth)}{o.label}</option>
-        {/each}
-      </select>
-    </label>
+      <FolderPicker selected={folderId} onselect={(id) => (folderId = id)} label="Folder" />
+      {#if moving}
+        <label class="field move-pw">
+          <span class="field-label">Moving to another folder needs your login password</span>
+          <PasswordInput bind:value={loginPassword} autocomplete="current-password" mono={false} />
+        </label>
+      {/if}
+    </div>
 
     <div class="field">
       <span class="field-label"><ImageIcon size={14} /> Icon</span>
@@ -335,6 +345,7 @@
   .cf-type :global(svg) { position: absolute; left: 10px; color: var(--muted); pointer-events: none; }
   .cf-type select { padding-left: 30px; }
   .icon-btn.danger:hover { color: var(--red); }
+  .move-pw { margin-top: 10px; }
   .save { min-width: 220px; }
 
   .icon-field { display: flex; gap: 14px; align-items: flex-start; }
@@ -355,6 +366,7 @@
   }
   .sw.auto { background: var(--surface-2); color: var(--muted); font-size: 11px; font-weight: 700; border-color: var(--border); }
   .sw.on { border-color: var(--text); }
-  @media (prefers-color-scheme: dark) { .sw:not(.auto) { background: hsl(var(--h) 40% 30%); } }
+  @media (prefers-color-scheme: dark) { :global(:root:not([data-theme='light'])) .sw:not(.auto) { background: hsl(var(--h) 40% 30%); } }
+  :global(:root[data-theme='dark']) .sw:not(.auto) { background: hsl(var(--h) 40% 30%); }
   @media (max-width: 680px) { .save { width: 100%; } }
 </style>

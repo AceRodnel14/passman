@@ -1,5 +1,5 @@
 <script>
-  import { Eye, EyeOff, User, KeyRound, Globe, Folder, StickyNote, Lock, Type, Clock } from '@lucide/svelte';
+  import { Eye, EyeOff, User, KeyRound, Globe, Folder, StickyNote, Lock, Type, Clock, FolderInput } from '@lucide/svelte';
   import Modal from './Modal.svelte';
   import Shield from './Shield.svelte';
   import PasswordIcon from './PasswordIcon.svelte';
@@ -7,7 +7,7 @@
   import { relativeTime, healthText } from '../lib/util.js';
   import { clock } from '../lib/clock.svelte.js';
 
-  let { record, onclose } = $props();
+  let { record, onclose, onmove } = $props();
   let revealed = $state(new Set());
 
   function toggle(key) {
@@ -30,6 +30,11 @@
 {/snippet}
 
 <Modal title={record.label} {onclose} size="lg">
+  {#snippet actions()}
+    {#if onmove}
+      <button type="button" class="hbtn" onclick={onmove} aria-label="Move" title="Move to another folder"><FolderInput size={17} /></button>
+    {/if}
+  {/snippet}
   <div class="meta">
     <PasswordIcon label={record.label} icon={record.icon} size={40} />
     <span class="pill"><Shield health={record.health} size={16} /> {healthText[record.health]}</span>
@@ -76,6 +81,8 @@
 </Modal>
 
 <style>
+  .hbtn { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: #fff; cursor: pointer; }
+  .hbtn:hover { background: rgb(255 255 255 / 0.18); }
   .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 18px; }
   .pill {
     display: inline-flex; align-items: center; gap: 6px;

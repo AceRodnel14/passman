@@ -275,6 +275,9 @@ func (a *App) handleGetPassword(w http.ResponseWriter, r *http.Request, s *Sessi
 type passwordInput struct {
 	Record
 	Folder string `json:"folder"`
+	// LoginPassword is the login password, required on PUT only when the
+	// folder changes. (Not "password": that is the entry's own secret.)
+	LoginPassword string `json:"loginPassword"`
 }
 
 func (a *App) handleSavePassword(w http.ResponseWriter, r *http.Request, s *Session) {
@@ -288,20 +291,34 @@ func (a *App) handleSavePassword(w http.ResponseWriter, r *http.Request, s *Sess
 	}
 	ctx := r.Context()
 	v := s.vault()
+	id := r.PathValue("id")
+	creating := id == ""
+	if creating {
+		id = newUUID()
+	} else {
+		if !uuidRe.MatchString(id) {
+			writeError(w, http.StatusNotFound, "Not found.")
+			return
+		}
+		var current *string
+		err := a.db.QueryRow(ctx, `SELECT folder_id::text FROM passwords WHERE user_id = $1 AND id = $2::uuid`, v.userID, id).Scan(&current)
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "Not found.")
+			return
+		} else if err != nil {
+			serverError(w, err)
+			return
+		}
+		// Moving an entry needs the login password; editing in place does not.
+		if folderChanged(current, in.Folder) && !a.reauth(w, r, s, in.LoginPassword) {
+			return
+		}
+	}
 	if ok, err := folderExists(ctx, a.db, v.userID, in.Folder); err != nil {
 		serverError(w, err)
 		return
 	} else if !ok {
 		writeError(w, http.StatusBadRequest, "That folder doesn't exist.")
-		return
-	}
-
-	id := r.PathValue("id")
-	creating := id == ""
-	if creating {
-		id = newUUID()
-	} else if !uuidRe.MatchString(id) {
-		writeError(w, http.StatusNotFound, "Not found.")
 		return
 	}
 	data := v.sealRecord(id, &in.Record)
@@ -456,4 +473,98 @@ func (a *App) handleGenerate(w http.ResponseWriter, r *http.Request, s *Session)
 	}
 	pw := generatePassphrase(length, q.Get("numbers") == "true", q.Get("symbols") == "true")
 	writeJSON(w, http.StatusOK, map[string]any{"password": pw})
+}
+
+type moveRequest struct {
+	Folder   string `json:"folder"`
+	Password string `json:"password"`
+}
+
+// handleMovePassword moves a record to another folder after re-checking the
+// account password. The record blob is not re-encrypted: its AAD is id-only.
+// A wrong password is 403, not 401, which the frontend treats as session expiry.
+func (a *App) handleMovePassword(w http.ResponseWriter, r *http.Request, s *Session) {
+	id := r.PathValue("id")
+	if !uuidRe.MatchString(id) {
+		writeError(w, http.StatusNotFound, "Not found.")
+		return
+	}
+	var req moveRequest
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if !a.reauth(w, r, s, req.Password) {
+		return
+	}
+	ctx := r.Context()
+	ok, err := folderExists(ctx, a.db, s.UserID, req.Folder)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusBadRequest, "That folder doesn't exist.")
+		return
+	}
+	tag, err := a.db.Exec(ctx,
+		`UPDATE passwords SET folder_id = $3::uuid, revision = $4::uuid, updated_at = now()
+		 WHERE user_id = $1 AND id = $2::uuid`,
+		s.UserID, id, nullFolder(req.Folder), newUUID())
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "Not found.")
+		return
+	}
+	folder := ""
+	if f := nullFolder(req.Folder); f != nil {
+		folder = *f
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"folder": folder})
+}
+
+// reauth re-checks the account password for folder changes. It writes the
+// error response and returns false on failure: empty password 400, KDF busy or
+// rate limited 429, wrong password 403 (not 401, which the frontend treats as
+// session expiry). The attempt counts against the login limiter and is cleared
+// on success or released on a server error.
+func (a *App) reauth(w http.ResponseWriter, r *http.Request, s *Session, password string) bool {
+	if password == "" {
+		writeError(w, http.StatusBadRequest, "Password is required.")
+		return false
+	}
+	if !a.kdf.tryAcquire() {
+		writeError(w, http.StatusTooManyRequests, "Busy, try again.")
+		return false
+	}
+	defer a.kdf.release()
+	key := normUsername(s.Username)
+	if !a.limiter.take(key) {
+		writeError(w, http.StatusTooManyRequests, "Too many failed attempts. Try again in a few minutes.")
+		return false
+	}
+	u, err := userByID(r.Context(), a.db, s.UserID)
+	if err != nil {
+		a.limiter.release(key)
+		serverError(w, err)
+		return false
+	}
+	if !checkPassword(password, u.AuthSalt, u.AuthHash) {
+		writeError(w, http.StatusForbidden, "Wrong password.")
+		return false
+	}
+	a.limiter.reset(key)
+	return true
+}
+
+// folderChanged reports whether requested names a different folder than the
+// entry's current one (nil is root; "" and the all-zero UUID both mean root).
+func folderChanged(current *string, requested string) bool {
+	req := nullFolder(requested)
+	if current == nil || req == nil {
+		return current != req
+	}
+	return !strings.EqualFold(*current, *req)
 }

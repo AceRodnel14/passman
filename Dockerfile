@@ -8,7 +8,7 @@ RUN npm run build
 
 # --- backend ---
 FROM golang:1.26-alpine AS build
-ARG VERSION=0.2.0
+ARG VERSION=0.2.1
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

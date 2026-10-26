@@ -24,6 +24,7 @@ type Session struct {
 	UserID   int64
 	Username string
 	IsAdmin  bool
+	Theme    Theme
 	DEK      []byte
 	Expires  time.Time
 	token    []byte
@@ -85,10 +86,10 @@ func (a *App) currentSession(r *http.Request) (*Session, error) {
 	s := &Session{token: token}
 	var wrapped []byte
 	err = a.db.QueryRow(r.Context(),
-		`SELECT s.user_id, s.wrapped_dek, u.username, u.is_admin, s.expires_at
+		`SELECT s.user_id, s.wrapped_dek, u.username, u.is_admin, u.theme_mode, u.theme_hue, s.expires_at
 		 FROM sessions s JOIN users u ON u.id = s.user_id
 		 WHERE s.token_hash = $1 AND s.expires_at > now()`, hash[:],
-	).Scan(&s.UserID, &wrapped, &s.Username, &s.IsAdmin, &s.Expires)
+	).Scan(&s.UserID, &wrapped, &s.Username, &s.IsAdmin, &s.Theme.Mode, &s.Theme.Hue, &s.Expires)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
@@ -229,7 +230,7 @@ func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	} else if s != nil {
-		resp["user"] = map[string]any{"username": s.Username, "isAdmin": s.IsAdmin}
+		resp["user"] = map[string]any{"username": s.Username, "isAdmin": s.IsAdmin, "theme": s.Theme}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -331,7 +332,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"username": u.Username, "isAdmin": false})
+	writeJSON(w, http.StatusOK, map[string]any{"username": u.Username, "isAdmin": false, "theme": u.Theme})
 }
 
 var errBadLogin = errors.New("wrong username or password")
@@ -387,7 +388,7 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"username": u.Username, "isAdmin": u.IsAdmin})
+	writeJSON(w, http.StatusOK, map[string]any{"username": u.Username, "isAdmin": u.IsAdmin, "theme": u.Theme})
 }
 
 func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {

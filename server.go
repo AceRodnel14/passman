@@ -56,6 +56,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/login", a.handleLogin)
 	mux.HandleFunc("POST /api/logout", a.handleLogout)
 	mux.HandleFunc("POST /api/account/password", a.auth(a.handleChangePassword))
+	mux.HandleFunc("PUT /api/account/theme", a.auth(a.handleSetTheme))
 
 	mux.HandleFunc("GET /api/vault", a.auth(a.handleVault))
 	mux.HandleFunc("GET /api/sites", a.auth(a.handleSites))
@@ -64,6 +65,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/passwords", a.auth(a.handleSavePassword))
 	mux.HandleFunc("PUT /api/passwords/{id}", a.auth(a.handleSavePassword))
 	mux.HandleFunc("DELETE /api/passwords/{id}", a.auth(a.handleDeletePassword))
+	mux.HandleFunc("POST /api/passwords/{id}/move", a.auth(a.handleMovePassword))
 	mux.HandleFunc("PUT /api/passwords/{id}/favorite", a.auth(a.handleFavorite("passwords")))
 	mux.HandleFunc("POST /api/folders", a.auth(a.handleCreateFolder))
 	mux.HandleFunc("PUT /api/folders/{id}", a.auth(a.handleRenameFolder))
