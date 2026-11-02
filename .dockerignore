@@ -2,3 +2,8 @@
 web/node_modules
 web/dist
 *.md
+.env
+.env.*
+docker-compose*.yml
+.gitlab-ci.yml
+**/*_test.go

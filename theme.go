@@ -49,7 +49,7 @@ func (a *App) handleSetTheme(w http.ResponseWriter, r *http.Request, s *Session)
 		writeError(w, http.StatusBadRequest, "Invalid theme.")
 		return
 	}
-	if _, err := a.db.Exec(r.Context(), `UPDATE users SET theme_mode = $2, theme_hue = $3 WHERE id = $1`, s.UserID, t.Mode, t.Hue); err != nil {
+	if _, err := a.db().Exec(r.Context(), `UPDATE users SET theme_mode = $2, theme_hue = $3 WHERE id = $1`, s.UserID, t.Mode, t.Hue); err != nil {
 		serverError(w, err)
 		return
 	}

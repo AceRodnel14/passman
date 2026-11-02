@@ -7,12 +7,25 @@
   import Admin from './pages/Admin.svelte';
   import { route, navigate } from './lib/router.svelte.js';
   import { session, loadSession, handleExpired } from './lib/session.svelte.js';
+  import { onMount } from 'svelte';
   import { onUnauthorized } from './lib/api.js';
 
   onUnauthorized(handleExpired);
 
   let bootError = $state('');
-  loadSession().catch((err) => (bootError = err.message));
+  // While the server's database isn't ready (503) keep the message up and retry, honouring Retry-After.
+  let retryTimer;
+  function boot() {
+    loadSession().then(
+      () => (bootError = ''),
+      (err) => {
+        bootError = err.message;
+        if (err.status === 503) retryTimer = setTimeout(boot, (err.retryAfter || 5) * 1000);
+      },
+    );
+  }
+  boot();
+  onMount(() => () => clearTimeout(retryTimer));
 
   // Resolve which page to show; redirect when the URL doesn't fit the state.
   const view = $derived.by(() => {

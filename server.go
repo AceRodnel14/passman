@@ -1,18 +1,24 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"log"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/puddle/v2"
 )
 
 //go:embed all:web/dist
@@ -20,8 +26,8 @@ var distFS embed.FS
 
 type App struct {
 	cfg     Config
-	db      *pgxpool.Pool
-	limiter *limiter // failed logins, per username
+	pool    atomic.Pointer[pgxpool.Pool] // set once the database is reachable; see db()
+	limiter *limiter                     // failed logins, per username
 
 	exportIP  *limiter // failed /api/export logins, per client IP
 	masterIP  *limiter // failed master keys on /api/backup-all, per client IP
@@ -32,9 +38,8 @@ type App struct {
 }
 
 func newApp(cfg Config, db *pgxpool.Pool) *App {
-	return &App{
+	a := &App{
 		cfg:       cfg,
-		db:        db,
 		limiter:   newLimiter(maxFails, failWindow),
 		exportIP:  newLimiter(20, 15*time.Minute),
 		masterIP:  newLimiter(5, 15*time.Minute),
@@ -42,6 +47,41 @@ func newApp(cfg Config, db *pgxpool.Pool) *App {
 		kdf:       make(sem, 2),
 		kdfAll:    make(sem, 1),
 	}
+	if db != nil {
+		a.pool.Store(db)
+	}
+	return a
+}
+
+// db returns the connection pool. Routed /api/ requests only reach handlers
+// once the pool is set (see requireDB), so it is non-nil there.
+func (a *App) db() *pgxpool.Pool { return a.pool.Load() }
+
+// requireDB answers every /api/ request with 503 JSON until the pool is set.
+func (a *App) requireDB(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a.pool.Load() == nil && strings.HasPrefix(r.URL.Path, "/api/") {
+			writeDBNotReady(w)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// handleReady reports readiness: the pool is set and the database answers.
+func (a *App) handleReady(w http.ResponseWriter, r *http.Request) {
+	db := a.pool.Load()
+	if db == nil {
+		http.Error(w, "database not ready", http.StatusServiceUnavailable)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if err := db.Ping(ctx); err != nil {
+		http.Error(w, "database not ready", http.StatusServiceUnavailable)
+		return
+	}
+	w.Write([]byte("ok"))
 }
 
 type authedHandler func(http.ResponseWriter, *http.Request, *Session)
@@ -49,6 +89,8 @@ type authedHandler func(http.ResponseWriter, *http.Request, *Session)
 func (a *App) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+
+	mux.HandleFunc("GET /readyz", a.handleReady)
 
 	mux.HandleFunc("GET /api/state", a.handleState)
 	mux.HandleFunc("POST /api/setup", a.handleSetup)
@@ -84,7 +126,7 @@ func (a *App) routes() http.Handler {
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, http.StatusNotFound, "Not found.") })
 	mux.Handle("/", spaHandler())
-	return securityHeaders(sameOrigin(mux))
+	return securityHeaders(sameOrigin(a.requireDB(mux)))
 }
 
 func (a *App) auth(h authedHandler) http.HandlerFunc {
@@ -217,7 +259,41 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 
 func serverError(w http.ResponseWriter, err error) {
 	log.Printf("error: %v", err)
+	if dbUnavailable(err) {
+		writeDBNotReady(w)
+		return
+	}
 	writeError(w, http.StatusInternalServerError, "Something went wrong on the server.")
+}
+
+// writeDBNotReady is the one 503 answer for "the database can't be reached",
+// shared by the startup gate and runtime failures.
+func writeDBNotReady(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "5")
+	writeError(w, http.StatusServiceUnavailable, "The database is not ready yet. Please try again shortly.")
+}
+
+// dbUnavailable reports whether err means the database could not be reached
+// (as opposed to a query or data error): failed connects, network errors,
+// acquire timeouts, a closed pool, or Postgres shutting down / refusing.
+func dbUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var ce *pgconn.ConnectError
+	if errors.As(err, &ce) {
+		return true
+	}
+	var ne net.Error
+	if errors.As(err, &ne) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, puddle.ErrClosedPool) {
+		return true
+	}
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) {
+		// 08 connection exception, 53300 too many connections, 57P01-03 shutdown/startup.
+		return strings.HasPrefix(pe.Code, "08") || pe.Code == "53300" || pe.Code == "57P01" || pe.Code == "57P02" || pe.Code == "57P03"
+	}
+	return false
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {

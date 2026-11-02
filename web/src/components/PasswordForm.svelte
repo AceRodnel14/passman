@@ -31,7 +31,9 @@
   let loginPassword = $state('');
   const moving = $derived(mode === 'edit' && (folderId ?? '') !== origFolder);
   let notes = $state(seed?.notes ?? '');
-  let fields = $state((seed?.customFields ?? []).map((f) => ({ ...f, show: false })));
+  // `key` is client-only (stable each-block identity); the save payload below picks label/type/value only.
+  let nextKey = 0;
+  let fields = $state((seed?.customFields ?? []).map((f) => ({ ...f, show: false, key: nextKey++ })));
   let showPassword = $state(false);
 
   // Icon: auto (first letter), letters (custom 1–2 chars) or an uploaded logo.
@@ -115,7 +117,7 @@
   }
 
   function addField() {
-    fields.push({ label: '', type: 'text', value: '', show: false });
+    fields.push({ label: '', type: 'text', value: '', show: false, key: nextKey++ });
   }
 
   async function save(e) {
@@ -236,7 +238,7 @@
         <div class="icon-preview"><PasswordIcon label={label || '?'} icon={iconPreview} size={64} /></div>
         <div class="icon-controls">
           <div class="seg" role="radiogroup" aria-label="Icon type">
-            {#each [['auto', 'Auto'], ['letters', 'Letters'], ['logo', 'Logo']] as [value, text]}
+            {#each [['auto', 'Auto'], ['letters', 'Letters'], ['logo', 'Logo']] as [value, text] (value)}
               <button type="button" role="radio" aria-checked={iconMode === value} class:on={iconMode === value} onclick={() => (iconMode = value)}>{text}</button>
             {/each}
           </div>
@@ -255,7 +257,7 @@
           </div>
           <div class="swatches" role="radiogroup" aria-label="Icon colour">
             <button type="button" role="radio" aria-checked={iconColor === ''} class="sw auto" class:on={iconColor === ''} onclick={() => (iconColor = '')} title="Automatic colour" aria-label="Automatic colour">A</button>
-            {#each Object.entries(palette) as [name, hue]}
+            {#each Object.entries(palette) as [name, hue] (name)}
               <button type="button" role="radio" aria-checked={iconColor === name} class="sw" class:on={iconColor === name} style="--h:{hue}" onclick={() => (iconColor = name)} title={name} aria-label={name}></button>
             {/each}
           </div>
@@ -273,7 +275,7 @@
       {#if fields.length === 0}
         <p class="hint none">Add extra values such as API tokens, recovery codes or a second password.</p>
       {/if}
-      {#each fields as f, i}
+      {#each fields as f, i (f.key)}
         <div class="cf-row">
           <input class="input cf-name" placeholder="Name" bind:value={f.label} aria-label="Field name" />
           <div class="input-wrap cf-value">
@@ -366,7 +368,7 @@
   }
   .sw.auto { background: var(--surface-2); color: var(--muted); font-size: 11px; font-weight: 700; border-color: var(--border); }
   .sw.on { border-color: var(--text); }
-  @media (prefers-color-scheme: dark) { :global(:root:not([data-theme='light'])) .sw:not(.auto) { background: hsl(var(--h) 40% 30%); } }
+  @media (prefers-color-scheme: dark) { :global(:root[data-theme='auto']) .sw:not(.auto) { background: hsl(var(--h) 40% 30%); } }
   :global(:root[data-theme='dark']) .sw:not(.auto) { background: hsl(var(--h) 40% 30%); }
   @media (max-width: 680px) { .save { width: 100%; } }
 </style>

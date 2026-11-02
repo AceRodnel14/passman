@@ -1,15 +1,18 @@
 import { api } from './api.js';
 import { toast } from './toast.svelte.js';
 import { storageGet, storageSet } from './util.js';
+import { createSaveScheduler } from './saveScheduler.js';
+import { themeVars, VAR_NAMES } from './themeVars.js';
 
-/** Theme: mode 'auto' | 'light' | 'dark'; hue 0..359, or null for the original blue. */
-export const DEFAULT_THEME = { mode: 'auto', hue: null };
-export const ORIGINAL_HUE = 201;
+export { DEFAULT_HUE } from './themeVars.js';
+
+/** Theme: mode 'light' | 'auto' | 'dark'; hue 0..359, or null for the default brand hue. */
+export const DEFAULT_THEME = { mode: 'light', hue: null };
 const CACHE_KEY = 'passman.theme';
 const MODES = ['auto', 'light', 'dark'];
 
 function normalize(t) {
-  const mode = MODES.includes(t?.mode) ? t.mode : 'auto';
+  const mode = MODES.includes(t?.mode) ? t.mode : DEFAULT_THEME.mode;
   const h = t?.hue;
   const hue = Number.isInteger(h) && h >= 0 && h < 360 ? h : null;
   return { mode, hue };
@@ -17,54 +20,47 @@ function normalize(t) {
 
 export const theme = $state(normalize(storageGet(CACHE_KEY, null)));
 let saved = { ...theme };
-let timer = null;
 let seq = 0;
+const THEME_URL = '/api/account/theme';
+const scheduler = createSaveScheduler({
+  delay: 300,
+  save: () => flush(),
+  // Page is going away: fire-and-forget with keepalive so the request outlives it.
+  saveOnExit: () => {
+    fetch(THEME_URL, {
+      method: 'PUT',
+      keepalive: true,
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: theme.mode, hue: theme.hue }),
+    }).catch(() => {});
+  },
+});
 
 const darkQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
 const effectiveDark = () => theme.mode === 'dark' || (theme.mode === 'auto' && !!darkQuery?.matches);
 
-const OVERRIDES = ['--accent', '--accent-strong', '--accent-soft', '--accent-glow', '--accent-hi', '--accent-lo'];
-
-/** Pull yellow/green hues darker so white text on the accent stays readable. */
-const bump = (h) => Math.max(0, 1 - Math.abs(h - 100) / 75);
-const hsl = (h, s, l) => `hsl(${(h + 360) % 360} ${s}% ${l}%)`;
-
-export function accentColors(h, dark) {
-  const b = bump(h);
-  return dark
-    ? {
-        '--accent': hsl(h, 74, 52 - 17 * b),
-        '--accent-strong': hsl(h, 80, 61 - 12 * b),
-        '--accent-soft': hsl(h + 3, 55, 15),
-      }
-    : {
-        '--accent': hsl(h, 100, 39 - 12 * b),
-        '--accent-strong': hsl(h, 100, 32 - 9 * b),
-        '--accent-soft': hsl(h, 69, 95),
-      };
-}
-
+/** Colours are set through the CSSOM (allowed by the CSP, unlike style attributes). */
 function apply() {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  if (theme.mode === 'auto') root.removeAttribute('data-theme');
-  else root.setAttribute('data-theme', theme.mode);
-  for (const p of OVERRIDES) root.style.removeProperty(p);
+  // light is the CSS default; auto follows the OS; dark is explicit
+  root.setAttribute('data-theme', theme.mode);
+  for (const p of VAR_NAMES) root.style.removeProperty(p);
   if (theme.hue === null) return;
-  const h = theme.hue;
-  const b = bump(h);
-  const vars = {
-    ...accentColors(h, effectiveDark()),
-    '--accent-glow': hsl(h - 5, 80, 52 - 14 * b),
-    '--accent-hi': hsl(h - 7, 87, 59 - 16 * b),
-    '--accent-lo': hsl(h + 3, 100, 20 - 4 * b),
-  };
-  for (const [k, v] of Object.entries(vars)) root.style.setProperty(k, v);
+  for (const [k, v] of Object.entries(themeVars(theme.hue, effectiveDark()))) root.style.setProperty(k, v);
 }
 
-// In auto mode the accent follows the OS light/dark setting.
+// In auto mode the tints follow the OS light/dark setting.
 darkQuery?.addEventListener?.('change', apply);
 apply();
+
+if (typeof document !== 'undefined') {
+  addEventListener('pagehide', () => scheduler.flushOnExit());
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') scheduler.flushOnExit();
+  });
+}
 
 function cache() {
   storageSet(CACHE_KEY, { mode: theme.mode, hue: theme.hue });
@@ -72,7 +68,7 @@ function cache() {
 
 /** Take the server's theme (login, register, state load) without saving it back. */
 export function adoptTheme(t) {
-  clearTimeout(timer);
+  scheduler.cancel();
   seq++;
   Object.assign(theme, normalize(t));
   saved = { ...theme };
@@ -84,7 +80,7 @@ async function flush() {
   const mine = ++seq;
   const body = { mode: theme.mode, hue: theme.hue };
   try {
-    const res = await api('PUT', '/api/account/theme', body);
+    const res = await api('PUT', THEME_URL, body);
     saved = normalize(res ?? body);
   } catch (err) {
     if (mine !== seq) return; // a newer change owns the state now
@@ -100,9 +96,8 @@ export function setTheme(patch) {
   Object.assign(theme, normalize({ ...theme, ...patch }));
   cache();
   apply();
-  clearTimeout(timer);
   seq++;
-  timer = setTimeout(flush, 300);
+  scheduler.schedule();
 }
 
 export function resetHue() {
@@ -111,6 +106,6 @@ export function resetHue() {
 
 /** Drop any unsent edit (logout / expired session). */
 export function cancelPendingTheme() {
-  clearTimeout(timer);
+  scheduler.cancel();
   seq++;
 }

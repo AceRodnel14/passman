@@ -19,7 +19,7 @@ func (a *App) handleListUsers(w http.ResponseWriter, r *http.Request, s *Session
 		CreatedAt         time.Time `json:"createdAt"`
 		PasswordChangedAt time.Time `json:"passwordChangedAt"`
 	}
-	rows, err := a.db.Query(r.Context(),
+	rows, err := a.db().Query(r.Context(),
 		`SELECT id, username, is_admin, created_at, password_changed_at FROM users ORDER BY is_admin DESC, lower(username)`)
 	if err != nil {
 		serverError(w, err)
@@ -47,7 +47,7 @@ func (a *App) handleAdminResetPassword(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	u, err := userByID(r.Context(), a.db, id)
+	u, err := userByID(r.Context(), a.db(), id)
 	if errors.Is(err, ErrNotFound) {
 		writeError(w, http.StatusNotFound, "User not found.")
 		return
@@ -63,7 +63,7 @@ func (a *App) handleAdminResetPassword(w http.ResponseWriter, r *http.Request, s
 	if u.ID == s.UserID {
 		keep = s.token
 	}
-	err = resetPasswordWithMasterKey(r.Context(), a.db, strings.TrimSpace(req.MasterKey), u.Username, req.Password, keep)
+	err = resetPasswordWithMasterKey(r.Context(), a.db(), strings.TrimSpace(req.MasterKey), u.Username, req.Password, keep)
 	if errors.Is(err, ErrBadMasterKey) {
 		writeError(w, http.StatusBadRequest, "That master key is not correct.")
 		return

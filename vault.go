@@ -209,7 +209,7 @@ func (a *App) handleVault(w http.ResponseWriter, r *http.Request, s *Session) {
 	v := s.vault()
 	ctx := r.Context()
 	folders := []folderView{}
-	rows, err := a.db.Query(ctx,
+	rows, err := a.db().Query(ctx,
 		`SELECT id::text, coalesce(parent_id::text, ''), label, favorite, updated_at FROM folders WHERE user_id = $1`, v.userID)
 	if err != nil {
 		serverError(w, err)
@@ -234,7 +234,7 @@ func (a *App) handleVault(w http.ResponseWriter, r *http.Request, s *Session) {
 	}
 
 	passwords := []passwordRow{}
-	rows, err = a.db.Query(ctx, passwordSelect, v.userID)
+	rows, err = a.db().Query(ctx, passwordSelect, v.userID)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -261,7 +261,7 @@ func (a *App) handleGetPassword(w http.ResponseWriter, r *http.Request, s *Sessi
 		return
 	}
 	v := s.vault()
-	d, err := v.scanPassword(a.db.QueryRow(r.Context(), passwordSelect+` AND p.id = $2::uuid`, v.userID, id))
+	d, err := v.scanPassword(a.db().QueryRow(r.Context(), passwordSelect+` AND p.id = $2::uuid`, v.userID, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "Not found.")
 		return
@@ -301,7 +301,7 @@ func (a *App) handleSavePassword(w http.ResponseWriter, r *http.Request, s *Sess
 			return
 		}
 		var current *string
-		err := a.db.QueryRow(ctx, `SELECT folder_id::text FROM passwords WHERE user_id = $1 AND id = $2::uuid`, v.userID, id).Scan(&current)
+		err := a.db().QueryRow(ctx, `SELECT folder_id::text FROM passwords WHERE user_id = $1 AND id = $2::uuid`, v.userID, id).Scan(&current)
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "Not found.")
 			return
@@ -314,7 +314,7 @@ func (a *App) handleSavePassword(w http.ResponseWriter, r *http.Request, s *Sess
 			return
 		}
 	}
-	if ok, err := folderExists(ctx, a.db, v.userID, in.Folder); err != nil {
+	if ok, err := folderExists(ctx, a.db(), v.userID, in.Folder); err != nil {
 		serverError(w, err)
 		return
 	} else if !ok {
@@ -326,7 +326,7 @@ func (a *App) handleSavePassword(w http.ResponseWriter, r *http.Request, s *Sess
 	risk := passwordRisk(in.Password, in.Username)
 
 	if creating {
-		_, err := a.db.Exec(ctx,
+		_, err := a.db().Exec(ctx,
 			`INSERT INTO passwords (user_id, id, folder_id, data, fingerprint, risk, revision)
 			 VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6, $7::uuid)`,
 			v.userID, id, nullFolder(in.Folder), data, fp, risk, newUUID())
@@ -335,7 +335,7 @@ func (a *App) handleSavePassword(w http.ResponseWriter, r *http.Request, s *Sess
 			return
 		}
 	} else {
-		tag, err := a.db.Exec(ctx,
+		tag, err := a.db().Exec(ctx,
 			`UPDATE passwords SET folder_id = $3::uuid, data = $4, fingerprint = $5, risk = $6, revision = $7::uuid, updated_at = now()
 			 WHERE user_id = $1 AND id = $2::uuid`,
 			v.userID, id, nullFolder(in.Folder), data, fp, risk, newUUID())
@@ -357,7 +357,7 @@ func (a *App) handleDeletePassword(w http.ResponseWriter, r *http.Request, s *Se
 		writeError(w, http.StatusNotFound, "Not found.")
 		return
 	}
-	if _, err := a.db.Exec(r.Context(), `DELETE FROM passwords WHERE user_id = $1 AND id = $2::uuid`, s.UserID, id); err != nil {
+	if _, err := a.db().Exec(r.Context(), `DELETE FROM passwords WHERE user_id = $1 AND id = $2::uuid`, s.UserID, id); err != nil {
 		serverError(w, err)
 		return
 	}
@@ -376,7 +376,7 @@ func (a *App) handleFavorite(table string) authedHandler {
 			return
 		}
 		// table is one of two constants chosen in routes(), never user input.
-		if _, err := a.db.Exec(r.Context(),
+		if _, err := a.db().Exec(r.Context(),
 			`UPDATE `+table+` SET favorite = $3 WHERE user_id = $1 AND id = $2::uuid`, s.UserID, id, req.Favorite); err != nil {
 			serverError(w, err)
 			return
@@ -396,7 +396,7 @@ func (a *App) handleCreateFolder(w http.ResponseWriter, r *http.Request, s *Sess
 		return
 	}
 	v := s.vault()
-	if ok, err := folderExists(r.Context(), a.db, v.userID, req.Parent); err != nil {
+	if ok, err := folderExists(r.Context(), a.db(), v.userID, req.Parent); err != nil {
 		serverError(w, err)
 		return
 	} else if !ok {
@@ -404,7 +404,7 @@ func (a *App) handleCreateFolder(w http.ResponseWriter, r *http.Request, s *Sess
 		return
 	}
 	id := newUUID()
-	if _, err := a.db.Exec(r.Context(),
+	if _, err := a.db().Exec(r.Context(),
 		`INSERT INTO folders (user_id, id, parent_id, label, revision) VALUES ($1, $2::uuid, $3::uuid, $4, $5::uuid)`,
 		v.userID, id, nullFolder(req.Parent), v.sealLabel(id, req.Label), newUUID()); err != nil {
 		serverError(w, err)
@@ -425,7 +425,7 @@ func (a *App) handleRenameFolder(w http.ResponseWriter, r *http.Request, s *Sess
 		return
 	}
 	v := s.vault()
-	tag, err := a.db.Exec(r.Context(),
+	tag, err := a.db().Exec(r.Context(),
 		`UPDATE folders SET label = $3, revision = $4::uuid, updated_at = now() WHERE user_id = $1 AND id = $2::uuid`,
 		v.userID, id, v.sealLabel(id, req.Label), newUUID())
 	if err != nil {
@@ -446,7 +446,7 @@ func (a *App) handleDeleteFolder(w http.ResponseWriter, r *http.Request, s *Sess
 		return
 	}
 	var children int
-	err := a.db.QueryRow(r.Context(),
+	err := a.db().QueryRow(r.Context(),
 		`SELECT (SELECT count(*) FROM folders WHERE user_id = $1 AND parent_id = $2::uuid)
 		      + (SELECT count(*) FROM passwords WHERE user_id = $1 AND folder_id = $2::uuid)`, s.UserID, id).Scan(&children)
 	if err != nil {
@@ -457,7 +457,7 @@ func (a *App) handleDeleteFolder(w http.ResponseWriter, r *http.Request, s *Sess
 		writeError(w, http.StatusConflict, "Only empty folders can be deleted.")
 		return
 	}
-	if _, err := a.db.Exec(r.Context(), `DELETE FROM folders WHERE user_id = $1 AND id = $2::uuid`, s.UserID, id); err != nil {
+	if _, err := a.db().Exec(r.Context(), `DELETE FROM folders WHERE user_id = $1 AND id = $2::uuid`, s.UserID, id); err != nil {
 		serverError(w, err)
 		return
 	}
@@ -497,7 +497,7 @@ func (a *App) handleMovePassword(w http.ResponseWriter, r *http.Request, s *Sess
 		return
 	}
 	ctx := r.Context()
-	ok, err := folderExists(ctx, a.db, s.UserID, req.Folder)
+	ok, err := folderExists(ctx, a.db(), s.UserID, req.Folder)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -506,7 +506,7 @@ func (a *App) handleMovePassword(w http.ResponseWriter, r *http.Request, s *Sess
 		writeError(w, http.StatusBadRequest, "That folder doesn't exist.")
 		return
 	}
-	tag, err := a.db.Exec(ctx,
+	tag, err := a.db().Exec(ctx,
 		`UPDATE passwords SET folder_id = $3::uuid, revision = $4::uuid, updated_at = now()
 		 WHERE user_id = $1 AND id = $2::uuid`,
 		s.UserID, id, nullFolder(req.Folder), newUUID())
@@ -545,7 +545,7 @@ func (a *App) reauth(w http.ResponseWriter, r *http.Request, s *Session, passwor
 		writeError(w, http.StatusTooManyRequests, "Too many failed attempts. Try again in a few minutes.")
 		return false
 	}
-	u, err := userByID(r.Context(), a.db, s.UserID)
+	u, err := userByID(r.Context(), a.db(), s.UserID)
 	if err != nil {
 		a.limiter.release(key)
 		serverError(w, err)

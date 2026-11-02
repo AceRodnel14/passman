@@ -189,11 +189,11 @@ func (a *App) handleBackupAll(w http.ResponseWriter, r *http.Request) {
 // backupAll recovers every user's data key through escrow and zips one backup
 // per user as <username>.json.
 func (a *App) backupAll(ctx context.Context, masterKey, backupPassword string) ([]byte, int, error) {
-	priv, err := unlockEscrow(ctx, a.db, masterKey)
+	priv, err := unlockEscrow(ctx, a.db(), masterKey)
 	if err != nil {
 		return nil, 0, err
 	}
-	rows, err := a.db.Query(ctx, `SELECT `+userCols+` FROM users ORDER BY id`)
+	rows, err := a.db().Query(ctx, `SELECT `+userCols+` FROM users ORDER BY id`)
 	if err != nil {
 		return nil, 0, err
 	}

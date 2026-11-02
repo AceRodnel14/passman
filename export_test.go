@@ -2,6 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/puddle/v2"
 	"github.com/yeka/zip"
 )
 
@@ -199,6 +206,14 @@ func TestExportShortBackupPassword(t *testing.T) {
 
 func TestExemptPathsRequireJSONContentType(t *testing.T) {
 	a := testApp(t, "10.0.0.0/24")
+	// A lazy pool (pgx dials only on first use) stands in for a ready database;
+	// these requests are rejected before any query.
+	db, err := pgxpool.New(context.Background(), "postgres://u@127.0.0.1:1/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	a.pool.Store(db)
 	h := a.routes()
 	for _, p := range []string{"/api/export", "/api/backup-all"} {
 		r := httptest.NewRequest(http.MethodPost, p, strings.NewReader(`{}`))
@@ -320,5 +335,65 @@ func TestPlainZipAndNesting(t *testing.T) {
 	zr, _ := zip.NewReader(bytes.NewReader(outer), int64(len(outer)))
 	if len(zr.File) != 1 || zr.File[0].Name != "passman-all.zip" {
 		t.Fatalf("outer entries: %v", zr.File)
+	}
+}
+
+func TestStartsWithoutDatabase(t *testing.T) {
+	h := newApp(Config{}, nil).routes()
+	get := func(method, path string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(method, path, nil))
+		return w
+	}
+	if w := get("GET", "/healthz"); w.Code != http.StatusOK {
+		t.Errorf("/healthz = %d, want 200", w.Code)
+	}
+	if w := get("GET", "/readyz"); w.Code != http.StatusServiceUnavailable {
+		t.Errorf("/readyz = %d, want 503", w.Code)
+	}
+	for _, p := range []string{"/api/state", "/api/vault", "/api/nope"} {
+		w := get("GET", p)
+		if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), `"error"`) {
+			t.Errorf("%s = %d %q, want 503 JSON", p, w.Code, w.Body.String())
+		}
+	}
+	if w := get("POST", "/api/login"); w.Code != http.StatusServiceUnavailable {
+		t.Errorf("POST /api/login = %d, want 503", w.Code)
+	}
+}
+
+func TestConnectLoopEmptyURL(t *testing.T) {
+	a := newApp(Config{}, nil)
+	a.connectLoop(context.Background()) // returns at once, no fatal
+	if a.db() != nil {
+		t.Fatal("pool set with empty DATABASE_URL")
+	}
+}
+
+func TestServerErrorMapping(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"connect error", &pgconn.ConnectError{Config: &pgconn.Config{}}, 503},
+		{"wrapped connect error", fmt.Errorf("query: %w", &pgconn.ConnectError{Config: &pgconn.Config{}}), 503},
+		{"net error", &net.OpError{Op: "dial", Err: errors.New("connection refused")}, 503},
+		{"acquire deadline", context.DeadlineExceeded, 503},
+		{"closed pool", puddle.ErrClosedPool, 503},
+		{"pg shutdown", &pgconn.PgError{Code: "57P01"}, 503},
+		{"pg connection exception", &pgconn.PgError{Code: "08006"}, 503},
+		{"pg unique violation", &pgconn.PgError{Code: "23505"}, 500},
+		{"plain error", errors.New("boom"), 500},
+	}
+	for _, c := range cases {
+		w := httptest.NewRecorder()
+		serverError(w, c.err)
+		if w.Code != c.want {
+			t.Errorf("%s: %d, want %d", c.name, w.Code, c.want)
+		}
+		if c.want == 503 && w.Header().Get("Retry-After") != "5" {
+			t.Errorf("%s: missing Retry-After", c.name)
+		}
 	}
 }

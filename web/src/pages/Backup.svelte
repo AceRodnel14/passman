@@ -50,12 +50,50 @@
   let restoreError = $state('');
   let result = $state(null);
 
-  function pick(e) {
-    file = e.currentTarget.files?.[0] ?? null;
+  let dragging = $state(false);
+
+  function setFile(f) {
+    file = f;
     needPassword = false;
     restorePassword = '';
     restoreError = '';
     result = null;
+  }
+
+  function pick(e) {
+    const input = e.currentTarget;
+    setFile(input.files?.[0] ?? null);
+    input.value = ''; // allow re-picking the same file
+  }
+
+  const hasFiles = (e) => !!e.dataTransfer?.types.includes('Files');
+
+  function onDragOver(e) {
+    e.preventDefault();
+    if (!restoreBusy && hasFiles(e)) dragging = true;
+  }
+
+  function onDrop(e) {
+    e.preventDefault();
+    dragging = false;
+    if (restoreBusy) return;
+    const f = e.dataTransfer?.files?.[0];
+    const name = f?.name.toLowerCase() ?? '';
+    if (!f || !(name.endsWith('.json') || name.endsWith('.zip'))) {
+      restoreError = 'Drop a .json or .zip backup file.';
+      return;
+    }
+    setFile(f);
+  }
+
+  // Stop a file dropped outside the zone from navigating the browser to it.
+  function windowDrag(e) {
+    if (hasFiles(e)) e.preventDefault();
+  }
+
+  function windowDrop(e) {
+    windowDrag(e);
+    dragging = false;
   }
 
   async function restore(e) {
@@ -85,6 +123,8 @@
 
   const logText = $derived(result ? (result.log.length ? result.log.join('\n') : 'Nothing was skipped or overwritten.') : '');
 </script>
+
+<svelte:window ondragover={windowDrag} ondrop={windowDrop} />
 
 <Layout section="backup">
   <div class="page">
@@ -128,9 +168,17 @@
 
         <form class="restore" onsubmit={restore}>
           <input bind:this={fileInput} class="sr-only" type="file" accept=".json,.zip,application/json,application/zip" onchange={pick} />
-          <button type="button" class="drop" onclick={() => fileInput.click()}>
+          <button
+            type="button"
+            class="drop"
+            class:dragging
+            onclick={() => fileInput.click()}
+            ondragover={onDragOver}
+            ondragleave={() => (dragging = false)}
+            ondrop={onDrop}
+          >
             <FileJson size={22} />
-            {#if file}<span><b>{file.name}</b> · {(file.size / 1024).toFixed(1)} KB</span>{:else}<span>Choose backup file…</span>{/if}
+            {#if file}<span><b>{file.name}</b> · {(file.size / 1024).toFixed(1)} KB</span>{:else}<span>Choose a file or drag it here</span>{/if}
           </button>
 
           {#if needPassword}
@@ -190,7 +238,9 @@
     padding: 18px; border: 1.5px dashed var(--border-strong); border-radius: var(--radius);
     background: var(--surface-2); color: var(--muted); font: inherit; cursor: pointer; text-align: left;
   }
-  .drop:hover { border-color: var(--accent); color: var(--text); }
+  .drop:hover, .drop.dragging { border-color: var(--accent); color: var(--text); }
+  .drop.dragging { background: var(--accent-soft); border-style: solid; }
+  .drop > :global(*) { pointer-events: none; }
   .drop :global(svg) { color: var(--accent); flex: none; }
   .drop span { overflow-wrap: anywhere; }
   fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }

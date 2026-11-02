@@ -10,6 +10,7 @@
   let expanded = $state(new Set(untrack(() => folderTrail(selected).slice(0, -1).map((f) => f.id))));
 
   function toggle(id) {
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- immutable copy, assigned back to $state
     const next = new Set(expanded);
     next.has(id) ? next.delete(id) : next.add(id);
     expanded = next;
@@ -57,7 +58,7 @@
   .picker { max-height: 220px; overflow: auto; padding: 6px; background: var(--sidebar); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); }
   .node { display: flex; align-items: center; padding-left: calc(var(--depth) * 14px); border-radius: 8px; }
   .node:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
-  .node.current { background: var(--accent); }
+  .node.current { background: var(--accent-fill); }
   .node.current .label, .node.current .twisty { color: #fff; }
   .root .label { font-weight: 600; padding-left: 8px; }
   .twisty {

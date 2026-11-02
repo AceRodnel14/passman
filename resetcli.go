@@ -25,6 +25,10 @@ func runResetPassword(args []string) int {
 	}
 	masterKey := strings.TrimSpace(args[0])
 	cfg := loadConfig()
+	if cfg.DatabaseURL == "" {
+		fmt.Fprintln(os.Stderr, "error: DATABASE_URL is required, e.g. postgres://user:pass@host:5432/passman")
+		return 1
+	}
 	db := connect(cfg)
 	defer db.Close()
 	ctx := context.Background()

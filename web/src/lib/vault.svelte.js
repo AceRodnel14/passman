@@ -32,6 +32,7 @@ export function findFolder(id) {
 /** Folders from root down to id (excluding root). */
 export function folderTrail(id) {
   const trail = [];
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- local, non-reactive cycle guard
   const seen = new Set();
   let f = id ? findFolder(id) : null;
   while (f && !seen.has(f.id)) {

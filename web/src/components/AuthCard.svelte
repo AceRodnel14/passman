@@ -20,7 +20,7 @@
     background:
       radial-gradient(1200px 600px at 10% -10%, color-mix(in srgb, var(--accent-hi) 55%, transparent), transparent 60%),
       radial-gradient(900px 500px at 110% 110%, color-mix(in srgb, var(--accent-lo) 70%, transparent), transparent 60%),
-      var(--accent);
+      var(--accent-fill);
   }
   .brand { display: flex; align-items: center; gap: 12px; color: #fff; font: 700 26px/1 var(--font); letter-spacing: -.02em; }
   .logo { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px; background: rgb(255 255 255 / .2); }

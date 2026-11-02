@@ -69,7 +69,8 @@ CREATE TABLE IF NOT EXISTS passwords (
 );
 CREATE INDEX IF NOT EXISTS passwords_fingerprint_idx ON passwords (user_id, fingerprint);
 
-ALTER TABLE users ADD COLUMN IF NOT EXISTS theme_mode TEXT NOT NULL DEFAULT 'auto';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS theme_mode TEXT NOT NULL DEFAULT 'light';
+ALTER TABLE users ALTER COLUMN theme_mode SET DEFAULT 'light';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS theme_hue SMALLINT;
 `
 
@@ -158,7 +159,7 @@ func dekAAD(username string) []byte { return []byte("dek:" + normUsername(userna
 // createUser builds the key material for a fresh account and inserts it.
 func createUser(ctx context.Context, q querier, pub *ecdh.PublicKey, username, password string, isAdmin bool) (*User, []byte, error) {
 	dek := randomBytes(keyLen)
-	u := &User{Username: username, IsAdmin: isAdmin, Theme: Theme{Mode: themeAuto}}
+	u := &User{Username: username, IsAdmin: isAdmin, Theme: Theme{Mode: themeLight}}
 	setUserPassword(u, dek, password)
 	escrow, err := escrowSeal(pub, dek, dekAAD(username))
 	if err != nil {

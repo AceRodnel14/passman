@@ -8,17 +8,42 @@ Highlights: nested folders, click-to-copy (single click copies the password, dou
 
 passman never contacts the internet at runtime. Fonts, icons, the generator word list and the weak-password list are all built in. Only `docker build` downloads dependencies.
 
-## Run
+## Self-hosting
+
+### Requirements
+- Docker with the Compose plugin, on `linux/amd64` or `linux/arm64`.
+- PostgreSQL is part of the Compose stack (`postgres:18.6-alpine3.24`); no separate setup.
+- Optional: a reverse proxy in front for HTTPS. passman itself serves plain HTTP on port `8080`; set
+  `SECURE_COOKIE=true` when it is served over HTTPS.
+
+### Quick start
+> **Create `.env` from `.env.example` and fill it in before the first start.** Secrets are
+> empty in the example: set `POSTGRES_PASSWORD` (letters and digits; Compose refuses to start
+> without it, and it is fixed once the volume exists).
 
 ```bash
-docker build -t passman:dev .
+mkdir passman && cd passman
+curl -fsSLO https://raw.githubusercontent.com/AceRodnel14/passman/main/docker-compose.yml
+curl -fsSL -o .env https://raw.githubusercontent.com/AceRodnel14/passman/main/.env.example
+# edit .env now: set POSTGRES_PASSWORD
+docker compose pull
+docker compose up -d
+```
+Open `http://<host>:8080` and complete the first-run setup below. Check health with
+`curl -f http://<host>:8080/healthz`. Tables are created on startup. passman starts without the database: it
+retries the connection (1 s, doubling up to 30 s) and answers `503` on `/readyz` and `/api/` until Postgres is up.
+
+To build from source instead, run `docker compose up -d --build` in a checkout.
+
+Without Compose, against an existing database:
+
+```bash
 docker run -d --name passman -p 8080:8080 --restart unless-stopped \
-  -e DATABASE_URL='postgres://USER:PASS@HOST:5432/passman' \
-  passman:dev
+  -e DATABASE_URL='postgres://<user>:<password>@<db-host>:5432/passman' \
+  eacer/passman:latest
 ```
 
-Tables are created on startup. `DATABASE_URL` must point to an existing database.
-
+### Configuration
 | Env var | Default | |
 |---|---|---|
 | `DATABASE_URL` | (required) | Postgres connection string |
@@ -26,6 +51,36 @@ Tables are created on startup. `DATABASE_URL` must point to an existing database
 | `SESSION_MAX_AGE` | `14d` | Login session lifetime from sign-in (`14d`, `36h`, …). Saved passwords never expire. |
 | `SECURE_COOKIE` | `false` | Set `true` when served over HTTPS |
 | `BACKUP_ALL_ALLOWED_IPS` | (empty) | Comma-separated CIDRs or IPs (bare IP = one host) allowed to call `POST /api/backup-all`, checked against the direct TCP peer. Empty disables that endpoint. |
+
+Compose-only variables (in `.env`):
+
+| Variable | Default | |
+|---|---|---|
+| `POSTGRES_USER` | `passman` | Database user |
+| `POSTGRES_PASSWORD` | none (required) | Letters and digits only (it is embedded in `DATABASE_URL`). Set it before the first start: it is fixed once the `pg-data` volume exists |
+| `POSTGRES_DB` | `passman` | Database name |
+| `IMAGE` | `eacer/passman:latest` | Image (and tag) Compose runs or builds |
+| `APP_BIND` / `APP_PORT` | `0.0.0.0` / `8080` | Host address and port to publish on |
+
+Under Compose, `DATABASE_URL` is built from the `POSTGRES_*` values; keep `LISTEN_ADDR` at `:8080`.
+
+### Data and backups
+All data lives in PostgreSQL, in the `pg-data` volume. Back up the database with:
+
+```bash
+docker compose exec db sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > passman.sql
+```
+
+Vault exports (JSON or encrypted zip) are described under [Backups](#backups).
+
+### Upgrading
+`latest` is the latest stable image and what Compose uses by default; `main` follows the default branch. Release tags `vX.Y` and
+`vX.Y.Z` are pushed when a release is tagged: pin `IMAGE` to `vX.Y` for patch updates only, then
+`docker compose pull && docker compose up -d`. Schema changes are applied at startup.
+
+### Health endpoints
+- `/healthz`: the process is up (liveness); it does not check the database.
+- `/readyz`: `200` when the database answers, `503` while it is unreachable or `DATABASE_URL` is unset (readiness).
 
 ## First run: admin and master key
 
@@ -48,7 +103,8 @@ Either way requires the master key. The user's saved passwords are kept, and all
 **From inside the container:**
 
 ```bash
-docker exec -it passman reset-password <master key>
+docker compose exec app reset-password <master key>
+# without Compose: docker exec -it passman reset-password <master key>
 ```
 
 It then asks for the username and the new password.
@@ -164,14 +220,14 @@ The test cases in `match_test.go` define the expected behaviour; `/api/fill` use
 
 The version is in `GET /api/state` and in the web UI (login card and user menu). It defaults to the `version` variable in
 `main.go` and can be set at build time (`-ldflags "-X main.version=1.2.3"`, or `docker build --build-arg VERSION=1.2.3`).
-Releases are git tags `v0.2.0` created by the maintainer after the merge; see `CHANGELOG.md`.
+Releases are git tags `vX.Y` and `vX.Y.Z` (e.g. `v1.0`, `v1.0.0`) created by the maintainer after the merge; see `CHANGELOG.md`.
 
 ## Debugging
 
 `psql` is included in the image:
 
 ```bash
-docker exec -it passman psql "$DATABASE_URL"
+docker compose exec app sh -c 'psql "$DATABASE_URL"'
 ```
 
 ## Development
@@ -180,9 +236,13 @@ The Go binary embeds the built frontend (`web/dist`), so build the frontend befo
 
 ```bash
 # frontend: build once, or run the dev server (proxies /api to localhost:8080)
-docker run --rm -v "$PWD/web":/app -w /app node:22-alpine sh -c 'npm ci && npm run build'
+docker run --rm -v "$PWD/web":/app -w /app node:22.23-alpine3.24 sh -c 'npm ci && npm run build'
 cd web && npm install && npm run dev
 
 # backend tests
-docker run --rm -v "$PWD":/src -w /src golang:1.26-alpine go test ./...
+docker run --rm -v "$PWD":/src -w /src golang:1.26-alpine3.24 go test .
+`./manual_cicd_lint.sh` runs the CI lint/test jobs locally in throwaway containers (`--list`, `--only`, `--skip`).
 ```
+
+---
+_Developed with assistance from Claude (Claude Opus 5.5, Claude Sonnet 5.5)._

@@ -1,8 +1,9 @@
 export class ApiError extends Error {
-  constructor(message, status, data) {
+  constructor(message, status, data, retryAfter = 0) {
     super(message);
     this.status = status;
     this.data = data;
+    this.retryAfter = retryAfter; // seconds, from the Retry-After header (0 when absent)
   }
 }
 
@@ -30,7 +31,7 @@ export async function api(method, url, body) {
   const data = isJSON ? await res.json() : await res.blob();
   if (!res.ok) {
     if (res.status === 401 && !url.startsWith('/api/login')) unauthorizedHandler();
-    throw new ApiError(data?.error || `Request failed (${res.status})`, res.status, data);
+    throw new ApiError(data?.error || `Request failed (${res.status})`, res.status, data, Number(res.headers.get('Retry-After')) || 0);
   }
   return data;
 }

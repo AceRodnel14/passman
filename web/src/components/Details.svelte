@@ -11,6 +11,7 @@
   let revealed = $state(new Set());
 
   function toggle(key) {
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- immutable copy, assigned back to $state
     const next = new Set(revealed);
     next.has(key) ? next.delete(key) : next.add(key);
     revealed = next;
@@ -62,7 +63,8 @@
       <dt><Folder size={14} /> Folder</dt>
       <dd><span class="value">{folderName}</span></dd>
     </div>
-    {#each record.customFields as f, i}
+    <!-- the list is read-only while open, so the object itself is a stable key -->
+    {#each record.customFields as f, i (f)}
       <div class="item">
         <dt>{#if f.type === 'secret'}<Lock size={14} />{:else}<Type size={14} />{/if} {f.label}</dt>
         <dd>

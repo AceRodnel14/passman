@@ -1,7 +1,7 @@
 <script>
   import { Sun, Moon, Monitor, RotateCcw } from '@lucide/svelte';
   import Modal from './Modal.svelte';
-  import { theme, setTheme, resetHue, ORIGINAL_HUE } from '../lib/theme.svelte.js';
+  import { theme, setTheme, resetHue, DEFAULT_HUE } from '../lib/theme.svelte.js';
 
   let { onclose } = $props();
   const modes = [
@@ -17,7 +17,7 @@
     <div class="field">
       <span class="field-label" id="ap-mode">Mode</span>
       <div class="seg" role="radiogroup" aria-labelledby="ap-mode">
-        {#each modes as [value, text, Icon]}
+        {#each modes as [value, text, Icon] (value)}
           <button type="button" role="radio" aria-checked={theme.mode === value} class:on={theme.mode === value} onclick={() => setTheme({ mode: value })}>
             <Icon size={15} /> {text}
           </button>
@@ -35,7 +35,7 @@
         min="0"
         max="359"
         step="1"
-        value={theme.hue ?? ORIGINAL_HUE}
+        value={theme.hue ?? DEFAULT_HUE}
         style="--stops:{stops}"
         oninput={(e) => setTheme({ hue: Number(e.currentTarget.value) })}
         aria-valuetext={theme.hue === null ? 'Original blue' : `Hue ${theme.hue}`}

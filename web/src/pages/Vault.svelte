@@ -186,7 +186,7 @@
     {#if loadError}
       <div class="callout danger">{loadError} <button class="btn" type="button" onclick={refresh}>Retry</button></div>
     {:else if !vault.loaded}
-      <div class="list skeleton">{#each Array(4) as _}<div class="row"></div>{/each}</div>
+      <div class="list skeleton">{#each { length: 4 }, i (i)}<div class="row"></div>{/each}</div>
     {:else if !exists}
       <div class="empty">
         <Folder size={40} />
@@ -218,7 +218,6 @@
           </div>
         {/each}
         {#each passwords as p (p.id)}
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div class="row password" role="listitem" title="Click: copy password · Double-click: copy username">
             <button type="button" class="star" class:on={p.favorite} onclick={() => toggleFavorite('passwords', p)} ondblclick={(e) => e.stopPropagation()} aria-label={p.favorite ? 'Unfavourite' : 'Favourite'}>
               <Star size={17} />

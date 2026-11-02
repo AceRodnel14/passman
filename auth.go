@@ -56,7 +56,7 @@ func (a *App) createSession(ctx context.Context, w http.ResponseWriter, userID i
 	hash := sha256.Sum256(token)
 	wrapped := seal(subKey(token, "passman session"), dek, sessionAAD(userID))
 	expires := time.Now().Add(a.cfg.SessionMaxAge)
-	if _, err := a.db.Exec(ctx,
+	if _, err := a.db().Exec(ctx,
 		`INSERT INTO sessions (token_hash, user_id, wrapped_dek, expires_at) VALUES ($1, $2, $3, $4)`,
 		hash[:], userID, wrapped, expires); err != nil {
 		return err
@@ -85,7 +85,7 @@ func (a *App) currentSession(r *http.Request) (*Session, error) {
 	hash := sha256.Sum256(token)
 	s := &Session{token: token}
 	var wrapped []byte
-	err = a.db.QueryRow(r.Context(),
+	err = a.db().QueryRow(r.Context(),
 		`SELECT s.user_id, s.wrapped_dek, u.username, u.is_admin, u.theme_mode, u.theme_hue, s.expires_at
 		 FROM sessions s JOIN users u ON u.id = s.user_id
 		 WHERE s.token_hash = $1 AND s.expires_at > now()`, hash[:],
@@ -115,9 +115,16 @@ func (a *App) clearCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: a.cfg.SecureCookie, SameSite: http.SameSiteLaxMode})
 }
 
-func (a *App) reapSessions() {
-	for range time.Tick(time.Hour) {
-		if _, err := a.db.Exec(context.Background(), `DELETE FROM sessions WHERE expires_at <= now()`); err != nil {
+func (a *App) reapSessions(ctx context.Context) {
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		if _, err := a.db().Exec(ctx, `DELETE FROM sessions WHERE expires_at <= now()`); err != nil && ctx.Err() == nil {
 			log.Printf("reap sessions: %v", err)
 		}
 	}
@@ -220,7 +227,7 @@ func (l *limiter) prune(key string) []time.Time {
 // --- handlers ---
 
 func (a *App) handleState(w http.ResponseWriter, r *http.Request) {
-	setUp, err := isSetUp(r.Context(), a.db)
+	setUp, err := isSetUp(r.Context(), a.db())
 	if err != nil {
 		serverError(w, err)
 		return
@@ -247,7 +254,7 @@ func (a *App) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	tx, err := a.db.Begin(ctx)
+	tx, err := a.db().Begin(ctx)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -312,7 +319,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	pub, err := escrowPublicKey(r.Context(), a.db)
+	pub, err := escrowPublicKey(r.Context(), a.db())
 	if errors.Is(err, ErrNotFound) {
 		writeError(w, http.StatusConflict, "passman has not been set up yet.")
 		return
@@ -320,7 +327,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	u, dek, err := createUser(r.Context(), a.db, pub, req.Username, req.Password, false)
+	u, dek, err := createUser(r.Context(), a.db(), pub, req.Username, req.Password, false)
 	if isUniqueViolation(err) {
 		writeError(w, http.StatusConflict, "That username is already taken.")
 		return
@@ -340,7 +347,7 @@ var errBadLogin = errors.New("wrong username or password")
 // checkLogin verifies a username and password and returns the user and their
 // unwrapped data key. Unknown users and wrong passwords give errBadLogin.
 func (a *App) checkLogin(ctx context.Context, username, password string) (*User, []byte, error) {
-	u, err := userByName(ctx, a.db, username)
+	u, err := userByName(ctx, a.db(), username)
 	if errors.Is(err, ErrNotFound) {
 		deriveKey(password, make([]byte, saltLen)) // similar timing for unknown users
 		return nil, nil, errBadLogin
@@ -395,7 +402,7 @@ func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		if token, err := base64.RawURLEncoding.DecodeString(c.Value); err == nil {
 			hash := sha256.Sum256(token)
-			if _, err := a.db.Exec(r.Context(), `DELETE FROM sessions WHERE token_hash = $1`, hash[:]); err != nil {
+			if _, err := a.db().Exec(r.Context(), `DELETE FROM sessions WHERE token_hash = $1`, hash[:]); err != nil {
 				log.Printf("logout: delete session: %v", err)
 			}
 		}
@@ -409,7 +416,7 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request, s *Se
 	if !readJSON(w, r, &req) {
 		return
 	}
-	u, err := userByID(r.Context(), a.db, s.UserID)
+	u, err := userByID(r.Context(), a.db(), s.UserID)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -423,7 +430,7 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request, s *Se
 		return
 	}
 	setUserPassword(u, s.DEK, req.Password)
-	tx, err := a.db.Begin(r.Context())
+	tx, err := a.db().Begin(r.Context())
 	if err != nil {
 		serverError(w, err)
 		return

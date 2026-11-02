@@ -40,7 +40,7 @@
     border-radius: 8px;
   }
   .node:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
-  .node.current { background: var(--accent); }
+  .node.current { background: var(--accent-fill); }
   .node.current .label, .node.current .twisty { color: #fff; }
   .twisty {
     display: grid; place-items: center; width: 22px; height: 30px; flex: none;

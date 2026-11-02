@@ -39,7 +39,7 @@
   img { width: 100%; height: 100%; object-fit: contain; image-rendering: auto; }
   /* Logos keep the light tile so dark logos stay visible. */
   @media (prefers-color-scheme: dark) {
-    :global(:root:not([data-theme='light'])) .tile:not(.logo) { background: hsl(var(--h) 40% 22%); color: hsl(var(--h) 70% 80%); }
+    :global(:root[data-theme='auto']) .tile:not(.logo) { background: hsl(var(--h) 40% 22%); color: hsl(var(--h) 70% 80%); }
   }
   :global(:root[data-theme='dark']) .tile:not(.logo) { background: hsl(var(--h) 40% 22%); color: hsl(var(--h) 70% 80%); }
 </style>

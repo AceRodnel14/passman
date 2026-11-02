@@ -98,7 +98,7 @@ func (a *App) buildBackup(ctx context.Context, v vault) ([]byte, error) {
 	version, encrypted := backupVersion, false
 	out := backupFile{Version: &version, Encrypted: &encrypted, Passwords: []backupPassword{}, Folders: []backupFolder{}, Tags: []any{}}
 
-	rows, err := a.db.Query(ctx,
+	rows, err := a.db().Query(ctx,
 		`SELECT id::text, revision::text, coalesce(parent_id::text, ''), label, favorite, updated_at FROM folders WHERE user_id = $1 ORDER BY created_at`, v.userID)
 	if err != nil {
 		return nil, err
@@ -120,7 +120,7 @@ func (a *App) buildBackup(ctx context.Context, v vault) ([]byte, error) {
 		return nil, rows.Err()
 	}
 
-	rows, err = a.db.Query(ctx,
+	rows, err = a.db().Query(ctx,
 		`SELECT id::text, revision::text, coalesce(folder_id::text, ''), data, favorite, updated_at FROM passwords WHERE user_id = $1 ORDER BY created_at`, v.userID)
 	if err != nil {
 		return nil, err
@@ -319,7 +319,7 @@ func parseBackup(data []byte) (*backupFile, error) {
 }
 
 func (a *App) importBackup(ctx context.Context, v vault, b *backupFile, overwrite bool) (*importResult, error) {
-	tx, err := a.db.Begin(ctx)
+	tx, err := a.db().Begin(ctx)
 	if err != nil {
 		return nil, err
 	}

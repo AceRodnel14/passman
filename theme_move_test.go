@@ -1,10 +1,16 @@
 package main
 
 import (
+	"context"
+	"crypto/ecdh"
+	"crypto/rand"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func intp(i int) *int { return &i }
@@ -207,5 +213,53 @@ func TestSavePasswordEarlyRejections(t *testing.T) {
 				t.Fatalf("status %d, want %d", rec.Code, tc.want)
 			}
 		})
+	}
+}
+
+// fakeQ satisfies querier; QueryRow yields a row whose Scan sets the id.
+type fakeQ struct{}
+
+func (fakeQ) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, nil
+}
+
+func (fakeQ) Query(context.Context, string, ...any) (pgx.Rows, error) { return nil, nil }
+
+func (fakeQ) QueryRow(context.Context, string, ...any) pgx.Row { return fakeRow{} }
+
+type fakeRow struct{}
+
+func (fakeRow) Scan(dest ...any) error {
+	if p, ok := dest[0].(*int64); ok {
+		*p = 1
+	}
+	return nil
+}
+
+func TestNewUserThemeDefaultsLight(t *testing.T) {
+	priv, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _, err := createUser(context.Background(), fakeQ{}, priv.PublicKey(), "alice", "pw", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Theme.Mode != themeLight || u.Theme.Hue != nil {
+		t.Fatalf("new user theme = %+v, want light with nil hue", u.Theme)
+	}
+}
+
+func TestSchemaThemeDefaultLight(t *testing.T) {
+	for _, want := range []string{
+		"theme_mode TEXT NOT NULL DEFAULT 'light'",
+		"ALTER COLUMN theme_mode SET DEFAULT 'light'",
+	} {
+		if !strings.Contains(schema, want) {
+			t.Errorf("schema lacks %q", want)
+		}
+	}
+	if strings.Contains(schema, "DEFAULT 'auto'") {
+		t.Error("schema still defaults to auto")
 	}
 }

@@ -194,7 +194,7 @@ type siteItem struct {
 // list on disk and match pages locally.
 func (a *App) handleSites(w http.ResponseWriter, r *http.Request, s *Session) {
 	v := s.vault()
-	rows, err := a.db.Query(r.Context(), passwordSelect, v.userID)
+	rows, err := a.db().Query(r.Context(), passwordSelect, v.userID)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -236,7 +236,7 @@ func (a *App) handleFill(w http.ResponseWriter, r *http.Request, s *Session) {
 		return
 	}
 	v := s.vault()
-	d, err := v.scanPassword(a.db.QueryRow(r.Context(), passwordSelect+` AND p.id = $2::uuid`, v.userID, id))
+	d, err := v.scanPassword(a.db().QueryRow(r.Context(), passwordSelect+` AND p.id = $2::uuid`, v.userID, id))
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !urlMatches(d.URL, r.URL.Query().Get("url"))) {
 		writeError(w, http.StatusNotFound, "Not found.")
 		return

@@ -28,6 +28,7 @@
   });
 
   function toggle(id) {
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- immutable copy, assigned back to $state
     const next = new Set(expanded);
     next.has(id) ? next.delete(id) : next.add(id);
     expanded = next;
@@ -122,7 +123,7 @@
   .topbar {
     display: flex; align-items: center; gap: 8px;
     height: 56px; padding: 0 12px 0 16px; flex: none;
-    background: linear-gradient(110deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 75%, var(--accent-glow)) 100%);
+    background: linear-gradient(110deg, var(--bar-a) 0%, var(--bar-b) 100%);
     color: #fff;
   }
   .drawer-btn { display: none; color: #fff; }
@@ -170,7 +171,7 @@
   }
   .root button :global(svg), .backup :global(svg) { color: var(--accent); }
   .root button:hover, .backup:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
-  .root.current button, .backup.current { background: var(--accent); color: #fff; }
+  .root.current button, .backup.current { background: var(--accent-fill); color: #fff; }
   .root.current button :global(svg), .backup.current :global(svg) { color: #fff; }
   .divider { height: 0; margin: 10px 4px; border: 0; border-top: 1px solid var(--border-strong); }
   main { flex: 1; min-width: 0; overflow: auto; }

@@ -1,21 +1,27 @@
+/* Light is the default. data-theme="auto" follows the OS; "dark" is explicit. The hsl() tokens
+   below are DEFAULT_HUE (src/lib/themeVars.js); `npm test` keeps them in sync. */
 :root {
-  --accent: #0082c9;
-  --accent-strong: #006aa3;
-  --accent-soft: #e6f3fb;
+  --accent: hsl(201 100% 34%);
+  --accent-strong: hsl(201 100% 32%);
+  --accent-soft: hsl(201 69% 95%);
   --accent-contrast: #ffffff;
-  --accent-glow: #1fb5e8;
-  --accent-hi: #3cc8f2;
-  --accent-lo: #003e66;
+  --accent-glow: hsl(196 80% 52%);
+  --accent-hi: hsl(194 87% 33%);
+  --accent-lo: hsl(204 100% 20%);
+  --bar-a: hsl(201 100% 37%);
+  --bar-b: hsl(198 96% 35%);
+  --accent-fill: hsl(201 100% 37%);
+  --accent-fill-hover: hsl(201 100% 32%);
 
-  --bg: #f4f7fa;
-  --surface: #ffffff;
-  --surface-2: #f8fafc;
-  --sidebar: #eef5fb;
-  --hover: #f0f6fb;
+  --bg: hsl(201 42% 96%);
+  --surface: hsl(201 40% 99%);
+  --surface-2: hsl(201 38% 97%);
+  --sidebar: hsl(201 50% 95%);
+  --hover: hsl(201 45% 93%);
   --text: #17212b;
   --muted: #64748b;
-  --border: #e2e8f0;
-  --border-strong: #cbd5e1;
+  --border: hsl(201 26% 88%);
+  --border-strong: hsl(201 22% 78%);
 
   --red: #dc2626;
   --orange: #ea7a0c;
@@ -33,22 +39,27 @@
   color-scheme: light;
 }
 
-:root[data-theme="light"] { color-scheme: light; }
-
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --accent: #2b9fe0;
-    --accent-strong: #4bb0ea;
-    --accent-soft: #11283a;
-    --bg: #0f151c;
-    --surface: #161e27;
-    --surface-2: #1b2530;
-    --sidebar: #131b24;
-    --hover: #1c2834;
+  :root[data-theme="auto"] {
+    --accent: hsl(201 74% 52%);
+    --accent-strong: hsl(201 80% 61%);
+    --accent-soft: hsl(204 55% 15%);
+    --accent-glow: hsl(196 75% 36%);
+    --accent-hi: hsl(194 60% 30%);
+    --accent-lo: hsl(204 80% 12%);
+    --bar-a: hsl(201 70% 38%);
+    --bar-b: hsl(193 75% 35%);
+    --accent-fill: hsl(201 74% 39%);
+    --accent-fill-hover: hsl(201 74% 36%);
+    --bg: hsl(201 28% 8%);
+    --surface: hsl(201 24% 11%);
+    --surface-2: hsl(201 24% 14%);
+    --sidebar: hsl(201 26% 10%);
+    --hover: hsl(201 26% 17%);
     --text: #e5ecf3;
     --muted: #94a3b8;
-    --border: #253241;
-    --border-strong: #334457;
+    --border: hsl(201 22% 20%);
+    --border-strong: hsl(201 20% 29%);
     --danger-soft: #3a1717;
     --warn-soft: #3a2f10;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 16px rgb(0 0 0 / 0.3);
@@ -58,18 +69,25 @@
 }
 
 :root[data-theme="dark"] {
-  --accent: #2b9fe0;
-  --accent-strong: #4bb0ea;
-  --accent-soft: #11283a;
-  --bg: #0f151c;
-  --surface: #161e27;
-  --surface-2: #1b2530;
-  --sidebar: #131b24;
-  --hover: #1c2834;
+  --accent: hsl(201 74% 52%);
+  --accent-strong: hsl(201 80% 61%);
+  --accent-soft: hsl(204 55% 15%);
+  --accent-glow: hsl(196 75% 36%);
+  --accent-hi: hsl(194 60% 30%);
+  --accent-lo: hsl(204 80% 12%);
+  --bar-a: hsl(201 70% 38%);
+  --bar-b: hsl(193 75% 35%);
+  --accent-fill: hsl(201 74% 39%);
+  --accent-fill-hover: hsl(201 74% 36%);
+  --bg: hsl(201 28% 8%);
+  --surface: hsl(201 24% 11%);
+  --surface-2: hsl(201 24% 14%);
+  --sidebar: hsl(201 26% 10%);
+  --hover: hsl(201 26% 17%);
   --text: #e5ecf3;
   --muted: #94a3b8;
-  --border: #253241;
-  --border-strong: #334457;
+  --border: hsl(201 22% 20%);
+  --border-strong: hsl(201 20% 29%);
   --danger-soft: #3a1717;
   --warn-soft: #3a2f10;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 16px rgb(0 0 0 / 0.3);
@@ -130,8 +148,8 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; line-height
 .btn:hover { background: var(--hover); }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: .55; cursor: not-allowed; }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
-.btn.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+.btn.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--accent-contrast); }
+.btn.primary:hover { background: var(--accent-fill-hover); border-color: var(--accent-fill-hover); }
 .btn.danger { color: var(--red); }
 .btn.danger.solid { background: var(--red); border-color: var(--red); color: #fff; }
 .btn.block { width: 100%; }
